@@ -279,7 +279,7 @@ class DirectCostMasterApp:
         try:
             selected_month = self.month_select.value
             ui.notify(f'Processing P&L file for {selected_month}...', type='info')
-            
+            print(self.processor.sheets_data['DL costs (direct)'])
             # Process the current file using our DC processor with selected month
             processed_records = self.dc_processor.process_file_for_month(
                 self.processor.sheets_data, 

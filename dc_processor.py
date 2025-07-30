@@ -25,7 +25,6 @@ class DirectCostProcessor:
         self.project_name = ""
         self.current_month = "June"
         self.processed_data = []
-        self.sheet_index_offset = 2
     
     def extract_project_name_from_filename(self, filename: str) -> str:
         """
@@ -96,27 +95,39 @@ class DirectCostProcessor:
             List of dictionaries containing processed DC records
         """
         processed_records = []
-        
+
         if df.empty:
             logger.warning("DL Costs (Direct) data is empty")
             return processed_records
         
         # Log the actual columns found in the data
-        logger.info(f"Available columns in DL Costs sheet: {list(df.columns)}")
+        logger.info(f"Initial DataFrame columns: {list(df.columns)}")
         
         # Find the section for the target month
-        month_start_row, month_end_row = self._find_month_section(df, target_month)
-        month_start_row += self.sheet_index_offset  # Adjust for sheet index offset
-        month_end_row += self.sheet_index_offset  # Adjust for sheet index offset
-        print(f"Month start row: {month_start_row}, Month end row: {month_end_row}")
-        if month_start_row is None:
+        month_header_row, month_end_row = self._find_month_section(df, target_month)
+        
+        if month_header_row is None:
             logger.warning(f"Month section '{target_month}' not found in DL Costs data")
             return processed_records
         
-        logger.info(f"Processing month '{target_month}' from rows {month_start_row} to {month_end_row}")
+        logger.info(f"Processing month '{target_month}' from rows {month_header_row} to {month_end_row}")
         
-        # Get the subset of data for this month
-        month_data = df.iloc[month_start_row:month_end_row] if month_end_row else df.iloc[month_start_row:]
+        # The actual headers are in the row immediately following the month header
+        header_row_index = month_header_row
+        # header_row_index = month_header_row + 1
+        
+        # Extract the headers for this specific month section
+        month_headers = self._extract_headers_from_row(df.iloc[header_row_index])
+        
+        # The data starts on the row after the headers
+        data_start_row = header_row_index + 1
+        
+        # Create a temporary DataFrame for this month's data with correct headers
+        month_data = df.iloc[data_start_row:month_end_row].copy()
+        month_data.columns = month_headers
+        month_data = month_data.reset_index(drop=True)
+        
+        logger.info(f"Processing month '{target_month}' with headers: {month_headers}")
         
         # Process each row of data for this month
         for index, row in month_data.iterrows():
@@ -125,12 +136,13 @@ class DirectCostProcessor:
                 first_col_value = row.iloc[0] if len(row) > 0 else None
                 if pd.isna(first_col_value) or str(first_col_value).strip() == '':
                     continue
-                
-                # Skip header rows and total rows
+                    
+                # Skip total rows within the month data
                 first_col_str = str(first_col_value).strip()
-                if (first_col_str.lower() in ['employee/ticket', 'total'] or 
-                    first_col_str == '' or 
-                    'total' in first_col_str.lower()):
+                logger.debug(f"Processing row {index}: {first_col_str}")
+                
+                if 'total' in first_col_str.lower():
+                    logger.debug(f"Skipping total row: {first_col_str}")
                     continue
                 
                 # Extract employee/ticket name from first column
@@ -141,16 +153,16 @@ class DirectCostProcessor:
                     'Employee': employee_ticket,
                     'Project': project_name,
                     'Month': target_month,
-                    'Bucket': self._determine_bucket_dl(row, df.columns),
+                    'Bucket': self._determine_bucket_dl(row, month_data.columns),
                     'Source': 'DL Costs (Direct)'
                 }
                 
                 # Map actual columns to our standard names based on position and content
-                column_mapping = self._create_column_mapping(df.columns)
+                column_mapping = self._create_column_mapping(month_data.columns)
                 
                 # Add data from mapped columns
                 for original_col, standard_col in column_mapping.items():
-                    if original_col in df.columns:
+                    if original_col in month_data.columns:
                         value = row.get(original_col, 0)
                         # Convert to numeric if possible, otherwise keep as string
                         try:
@@ -162,7 +174,7 @@ class DirectCostProcessor:
                             record[standard_col] = str(value) if pd.notna(value) else ''
                 
                 # Copy any additional columns that weren't mapped
-                for col in df.columns:
+                for col in month_data.columns:
                     if col not in column_mapping and col not in record:
                         record[col] = row.get(col, '')
                 
@@ -174,6 +186,25 @@ class DirectCostProcessor:
         
         logger.info(f"Processed {len(processed_records)} DL Cost records for {target_month}")
         return processed_records
+    
+    def _extract_headers_from_row(self, header_row: pd.Series) -> List[str]:
+        """
+        Extracts and cleans column headers from a pandas Series.
+        
+        Args:
+            header_row: The pandas Series representing the header row.
+            
+        Returns:
+            A list of cleaned header strings.
+        """
+        new_columns = []
+        for i, val in enumerate(header_row.values):
+            if pd.notna(val) and str(val).strip():
+                new_columns.append(str(val).strip())
+            else:
+                # Fallback for empty or NaN headers
+                new_columns.append(f"Unnamed: {i}")
+        return new_columns
     
     def process_vc_costs_direct(self, df: pd.DataFrame, project_name: str) -> List[Dict]:
         """
@@ -234,6 +265,7 @@ class DirectCostProcessor:
     def _create_column_mapping(self, columns: List[str]) -> Dict[str, str]:
         """
         Create a mapping from actual column names to standardized names.
+        Uses position-based mapping for Unnamed columns based on typical Excel structure.
         
         Args:
             columns: List of actual column names from the DataFrame
@@ -243,43 +275,121 @@ class DirectCostProcessor:
         """
         mapping = {}
         
-        for col in columns:
-            col_lower = str(col).lower().strip()
+        # Expected column positions based on the Excel structure you showed
+        expected_positions = {
+            0: 'Employee/Ticket',  # First column is always Employee/Ticket
+            1: 'TOTAL Hours direct',
+            2: 'Hours direct', 
+            3: 'Hours sick leave paid by project',
+            4: 'Man-months direct',
+            5: 'TOTAL DL costs',
+            6: 'Base salary',
+            7: 'Sick leave Paid by Project',
+            8: 'Paid overtime',
+            9: 'Unconditional Bonus',
+            10: 'Payroll taxes',
+            11: 'Accrued Vacation Liability',
+            12: 'Paid vacation',
+            13: 'VC.Medical Insurance'
+        }
+        
+        for i, col in enumerate(columns):
+            col_str = str(col).strip()
+            col_lower = col_str.lower()
             
-            # Map based on the actual structure you provided
-            if 'employee' in col_lower or 'ticket' in col_lower:
-                continue  # Skip employee/ticket column as it's handled separately
-            elif 'total hours direct' in col_lower or col_lower == 'total hours direct':
-                mapping[col] = 'Total Hours Direct'
-            elif 'hours direct' in col_lower and 'total' not in col_lower:
-                mapping[col] = 'Hours Direct'
-            elif 'hours sick leave' in col_lower or 'sick leave' in col_lower:
-                mapping[col] = 'Sick Leave Hours'
-            elif 'man-months' in col_lower or 'man months' in col_lower:
-                mapping[col] = 'Man-Months Direct'
-            elif 'total dl costs' in col_lower or col_lower == 'total dl costs':
-                mapping[col] = 'Total DL Costs'
-            elif 'base salary' in col_lower:
-                mapping[col] = 'Base Salary'
-            elif 'sick leave paid' in col_lower:
-                mapping[col] = 'Sick Leave Paid'
-            elif 'paid overtime' in col_lower:
-                mapping[col] = 'Paid Overtime'
-            elif 'unconditional bonus' in col_lower:
-                mapping[col] = 'Unconditional Bonus'
-            elif 'payroll tax' in col_lower:
-                mapping[col] = 'Payroll Taxes'
-            elif 'vacation liability' in col_lower:
-                mapping[col] = 'Accrued Vacation Liability'
-            elif 'paid vacation' in col_lower:
-                mapping[col] = 'Paid Vacation'
-            elif 'medical insurance' in col_lower:
-                mapping[col] = 'Medical Insurance'
+            # Skip the first column (Employee/Ticket) as it's handled separately
+            if i == 0:
+                continue
+            
+            # Handle Unnamed columns by position
+            if 'unnamed' in col_lower or col_str.startswith('Unnamed'):
+                if i in expected_positions:
+                    standard_name = self._get_standard_name_for_position(i)
+                    if standard_name:
+                        mapping[col] = standard_name
+                continue
+            
+            # Handle named columns
+            standard_name = self._map_named_column(col_str)
+            if standard_name:
+                mapping[col] = standard_name
             else:
                 # Keep original column name for unmapped columns
                 mapping[col] = col
         
         return mapping
+    
+    def _get_standard_name_for_position(self, position: int) -> Optional[str]:
+        """
+        Get standardized column name based on position in Excel sheet.
+        
+        Args:
+            position: 0-based column position
+            
+        Returns:
+            Standard column name or None if position not recognized
+        """
+        position_mapping = {
+            1: 'Total Hours Direct',
+            2: 'Hours Direct',
+            3: 'Sick Leave Hours', 
+            4: 'Man-Months Direct',
+            5: 'Total DL Costs',
+            6: 'Base Salary',
+            7: 'Sick Leave Paid',
+            8: 'Paid Overtime',
+            9: 'Unconditional Bonus',
+            10: 'Payroll Taxes',
+            11: 'Accrued Vacation Liability',
+            12: 'Paid Vacation',
+            13: 'Medical Insurance'
+        }
+        
+        return position_mapping.get(position)
+    
+    def _map_named_column(self, col_name: str) -> Optional[str]:
+        """
+        Map a named column to its standard name.
+        
+        Args:
+            col_name: Original column name
+            
+        Returns:
+            Standard column name or None if not recognized
+        """
+        col_lower = col_name.lower().strip()
+        
+        # Map based on the actual structure you provided
+        if 'employee' in col_lower or 'ticket' in col_lower:
+            return None  # Skip employee/ticket column as it's handled separately
+        elif 'total hours direct' in col_lower:
+            return 'Total Hours Direct'
+        elif 'hours direct' in col_lower and 'total' not in col_lower:
+            return 'Hours Direct'
+        elif 'hours sick leave' in col_lower or ('sick leave' in col_lower and 'hours' in col_lower):
+            return 'Sick Leave Hours'
+        elif 'man-months' in col_lower or 'man months' in col_lower:
+            return 'Man-Months Direct'
+        elif 'total dl costs' in col_lower:
+            return 'Total DL Costs'
+        elif 'base salary' in col_lower:
+            return 'Base Salary'
+        elif 'sick leave paid' in col_lower:
+            return 'Sick Leave Paid'
+        elif 'paid overtime' in col_lower:
+            return 'Paid Overtime'
+        elif 'unconditional bonus' in col_lower:
+            return 'Unconditional Bonus'
+        elif 'payroll tax' in col_lower:
+            return 'Payroll Taxes'
+        elif 'vacation liability' in col_lower:
+            return 'Accrued Vacation Liability'
+        elif 'paid vacation' in col_lower:
+            return 'Paid Vacation'
+        elif 'medical insurance' in col_lower or 'vc.medical' in col_lower:
+            return 'Medical Insurance'
+        else:
+            return None
     
     def _find_month_section(self, df: pd.DataFrame, target_month: str) -> Tuple[Optional[int], Optional[int]]:
         """
@@ -311,30 +421,18 @@ class DirectCostProcessor:
         start_row = None
         end_row = None
 
-        print(df)
         # Search through the DataFrame for month headers
         for index, row in df.iterrows():
             # Check first column for month names
             first_col_value = str(row.iloc[0] if len(row) > 0 else '').strip().lower()
             print(f"Checking row {index}: {first_col_value}")
+            
             # Check if this row contains our target month
             for variation in target_variations:
                 if variation in first_col_value:
-                    start_row = index  # Start from the next row (after the month header)
+                    start_row = index + 1  # Start from the row AFTER the month header
                     logger.info(f"Found month section '{target_month}' starting at row {start_row}")
                     break
-            
-            # If we found the start and this is a new month header, set end_row
-            if start_row is not None and index > start_row:
-                # Check if this is another month header
-                months = ['january', 'february', 'march', 'april', 'may', 'june',
-                         'july', 'august', 'september', 'october', 'november', 'december']
-                
-                for month in months:
-                    if month in first_col_value and month not in target_variations:
-                        end_row = index + 1
-                        logger.info(f"Month section '{target_month}' ends at row {end_row}")
-                        return start_row, end_row
         
         # If we found a start but no end, process until the end of the data
         if start_row is not None:
@@ -342,7 +440,7 @@ class DirectCostProcessor:
             for index in range(start_row, len(df)):
                 first_col_value = str(df.iloc[index, 0] if len(df.iloc[index]) > 0 else '').strip().lower()
                 if 'total' in first_col_value:
-                    print(f"Found TOTAL row at index {index}, ending month section")
+                    logger.debug(f"Found TOTAL row at index {index}, ending month section")
                     end_row = index
                     break
 
@@ -363,25 +461,35 @@ class DirectCostProcessor:
         employee_ticket = str(row.iloc[0] if len(row) > 0 else '').strip()
         
         # Rule 1: PM role charge entries
-        if 'PM role charge' in employee_ticket:
+        if 'PM role charge' in employee_ticket or 'pm role charge' in employee_ticket.lower():
             return 'PM role charge'
 
         # Try to find relevant columns for other rules
+        # Using both position-based and name-based approaches
         total_hours_col = None
         sick_hours_col = None
         bonus_col = None
         total_dl_col = None
         
-        for col in columns:
+        for i, col in enumerate(columns):
             col_lower = str(col).lower()
+            
+            # Position-based identification (more reliable for Unnamed columns)
+            if i == 1:  # TOTAL Hours direct
+                total_hours_col = col
+            elif i == 3:  # Hours sick leave paid by project
+                sick_hours_col = col
+            elif i == 9:  # Unconditional Bonus
+                bonus_col = col
+            elif i == 5:  # TOTAL DL costs
+                total_dl_col = col
+            
+            # Name-based identification (fallback)
             if 'total hours direct' in col_lower:
                 total_hours_col = col
             elif 'hours sick leave' in col_lower or ('sick leave' in col_lower and 'hours' in col_lower):
                 sick_hours_col = col
             elif 'unconditional bonus' in col_lower:
-                bonus_col = col
-            elif 'total dl costs' in col_lower:
-                total_dl_col = col
                 bonus_col = col
             elif 'total dl costs' in col_lower:
                 total_dl_col = col
@@ -391,9 +499,11 @@ class DirectCostProcessor:
             try:
                 total_hours = float(row.get(total_hours_col, 0) or 0)
                 sick_hours = float(row.get(sick_hours_col, 0) or 0)
+                print(f"Employee {employee_ticket}: Total hours = {total_hours}, Sick hours = {sick_hours}")
                 if total_hours > 0 and sick_hours > 0 and abs(total_hours - sick_hours) < 0.01:
                     return 'Sick leave'
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as e:
+                print(f"Error processing sick leave rule: {e}")
                 pass
         
         # Rule 3: Bonus - amount in unconditional bonus matches amount in total DL
@@ -401,9 +511,11 @@ class DirectCostProcessor:
             try:
                 bonus_amount = float(row.get(bonus_col, 0) or 0)
                 total_dl_amount = float(row.get(total_dl_col, 0) or 0)
+                print(f"Employee {employee_ticket}: Bonus = {bonus_amount}, Total DL = {total_dl_amount}")
                 if bonus_amount > 0 and total_dl_amount > 0 and abs(bonus_amount - total_dl_amount) < 0.01:
                     return 'Bonus'
-            except (ValueError, TypeError):
+            except (ValueError, TypeError) as e:
+                print(f"Error processing bonus rule: {e}")
                 pass
         
         # Default bucket for regular employees

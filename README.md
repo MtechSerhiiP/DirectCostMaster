@@ -7,6 +7,8 @@ A modern web-based application for processing P&L Excel files and consolidating 
 - **Modern Web Interface**: Clean, minimalist design with responsive layout
 - **In-Memory File Processing**: Uses IOBytes approach - no temporary files on disk
 - **Excel File Support**: Handles .xlsx and .xls files with multiple sheets
+- **Smart Column Mapping**: Automatically handles Unnamed columns from merged Excel cells
+- **Month-Specific Processing**: Extracts and processes data for specific months
 - **Automated Data Processing**: Implements business rules for DL and VC costs
 - **Master File Generation**: Consolidates data from multiple projects
 - **Real-time Preview**: View data before processing
@@ -68,7 +70,34 @@ DirectCostMaster/
 - **Data Processing**: pandas for Excel manipulation
 - **Excel Support**: openpyxl engine for .xlsx files
 - **Memory Management**: IOBytes approach for file handling
+- **Column Mapping**: Position-based mapping for handling Unnamed Excel columns
+- **Month Processing**: Automatic detection of monthly data sections
 - **Logging**: Comprehensive logging for debugging
+
+## Excel File Requirements
+
+The application expects Excel files with the following structure:
+
+### DL Costs (Direct) Sheet
+- Monthly sections with data organized by month (e.g., "February 2025", "March 2025")
+- Employee/Ticket names in the first column
+- Standard columns for hours, costs, and other metrics
+- Handles merged cells and unnamed columns automatically
+
+### Supported Column Types
+- TOTAL Hours direct
+- Hours direct  
+- Hours sick leave paid by project
+- Man-months direct
+- TOTAL DL costs
+- Base salary
+- Sick leave Paid by Project
+- Paid overtime
+- Unconditional Bonus
+- Payroll taxes
+- Accrued Vacation Liability
+- Paid vacation
+- VC.Medical Insurance
 
 ## Browser Compatibility
 
