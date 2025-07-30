@@ -93,6 +93,7 @@ class DirectCostMasterApp:
         self.process_button = None
         self.download_button = None
         self.results_card = None
+        self.month_select = None
         
     def create_header(self):
         """Create the application header with title and description."""
@@ -153,6 +154,15 @@ class DirectCostMasterApp:
         with ui.card().classes('w-full max-w-2xl mx-auto p-6 shadow-lg mt-6'):
             ui.label('Process Data').classes('text-xl font-semibold mb-4')
             
+            # Month selection
+            ui.label('Select Month to Process:').classes('text-sm font-medium mb-2')
+            self.month_select = ui.select(
+                options=['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'],
+                value='June'
+            ).classes('w-full mb-4')
+            self.month_select.tooltip('Select the month to process from the P&L file')
+            
             with ui.row().classes('w-full gap-4'):
                 self.process_button = ui.button(
                     'Process P&L File',
@@ -168,7 +178,7 @@ class DirectCostMasterApp:
             # Initially disabled until file is loaded
             self.process_button.set_enabled(False)
             
-            ui.label('This will process the Excel data according to the Direct Cost Master workflow.').classes('text-sm text-gray-500 mt-2')
+            ui.label('This will process the Excel data according to the Direct Cost Master workflow for the selected month.').classes('text-sm text-gray-500 mt-2')
     
     def create_results_section(self):
         """Create the results and download section."""
@@ -267,16 +277,18 @@ class DirectCostMasterApp:
             return
         
         try:
-            ui.notify('Processing P&L file...', type='info')
+            selected_month = self.month_select.value
+            ui.notify(f'Processing P&L file for {selected_month}...', type='info')
             
-            # Process the current file using our DC processor
-            processed_records = self.dc_processor.process_complete_file(
+            # Process the current file using our DC processor with selected month
+            processed_records = self.dc_processor.process_file_for_month(
                 self.processor.sheets_data, 
-                self.processor.file_name
+                self.processor.file_name,
+                selected_month
             )
             
             if not processed_records:
-                ui.notify('No data was processed. Please check the file format and sheet names.', type='warning')
+                ui.notify(f'No data was processed for {selected_month}. Please check the file format and month availability.', type='warning')
                 return
             
             # Add processed data to master file
@@ -285,8 +297,8 @@ class DirectCostMasterApp:
             # Update results display
             self.update_results_display()
             
-            logger.info(f"Successfully processed {len(processed_records)} records")
-            ui.notify(f'Successfully processed {len(processed_records)} records!', type='positive')
+            logger.info(f"Successfully processed {len(processed_records)} records for {selected_month}")
+            ui.notify(f'Successfully processed {len(processed_records)} records for {selected_month}!', type='positive')
             
         except Exception as e:
             logger.error(f"Error in data processing: {str(e)}")
