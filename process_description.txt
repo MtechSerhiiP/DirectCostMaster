@@ -1,0 +1,14 @@
+Download P&Ls for each project (example attached)
+Create a file for all DC in the program (attached)
+For each project:
+Copy and paste all DC for that month from the tab "DL Costs (Direct)", column "Employee/Ticket" to the DC file, column "Employee"
+Enter project name from the file name of the P&L to the column "Project" in the DC file
+Copy and paste data from P&L (columns from "Total hours direct" to "Medical insurance") to the matching columns in the DC file
+For "PM role charge" entries, insert "PM role charge" in the "Bucket" column
+For employees, whose hours in "Sick leave" column match hours in the "Total hours direct", insert "Sick leave" in the "Bucket" column
+For employees, whose amount in "Unconditional bonus" column matches the amount in the "Total DL", insert "Bonus" in the "Bucket" column
+Copy and paste all DC for that month from the tab "VC Costs (Direct)" (column "Employee/Ticket") to the DC file, column "Employee"
+For DC from the tab "VC Costs (Direct)":
+Copy and paste the data from column "TOTAL" in the P&L to the column "TOTAL DL costs" in the DC file
+If the DC name starts with "Recruiting costs", insert "Recruiting costs" in the "Bucket" column
+If not, insert "DC-other DC" in the "Bucket" column
