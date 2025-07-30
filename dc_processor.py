@@ -145,41 +145,115 @@ class DirectCostProcessor:
                     logger.debug(f"Skipping total row: {first_col_str}")
                     continue
                 
-                # Extract employee/ticket name from first column
                 employee_ticket = first_col_str
                 
-                # Create base record with the data structure we have
-                record = {
+                # Base info for all generated records from this row
+                base_record_info = {
                     'Employee': employee_ticket,
                     'Project': project_name,
                     'Month': target_month,
-                    'Bucket': self._determine_bucket_dl(row, month_data.columns),
-                    'Source': 'DL Costs (Direct)'
                 }
                 
-                # Map actual columns to our standard names based on position and content
+                # Map original column names to standard names
                 column_mapping = self._create_column_mapping(month_data.columns)
-                
-                # Add data from mapped columns
-                for original_col, standard_col in column_mapping.items():
-                    if original_col in month_data.columns:
-                        value = row.get(original_col, 0)
-                        # Convert to numeric if possible, otherwise keep as string
-                        try:
-                            if pd.notna(value) and str(value).strip() != '':
-                                record[standard_col] = float(value)
-                            else:
-                                record[standard_col] = 0
-                        except (ValueError, TypeError):
-                            record[standard_col] = str(value) if pd.notna(value) else ''
-                
-                # Copy any additional columns that weren't mapped
-                for col in month_data.columns:
-                    if col not in column_mapping and col not in record:
-                        record[col] = row.get(col, '')
-                
-                processed_records.append(record)
-                
+                reverse_column_mapping = {v: k for k, v in column_mapping.items()}
+
+                def get_cost(standard_name):
+                    col = reverse_column_mapping.get(standard_name)
+                    return float(row.get(col, 0) or 0) if col else 0
+
+                # Get all potential cost values
+                total_hours_direct_val = get_cost('Total Hours Direct')
+                total_dl_costs_val = get_cost('Total DL Costs')
+                paid_overtime_val = get_cost('Paid Overtime')
+                base_salary_val = get_cost('Base Salary')
+                payroll_taxes_val = get_cost('Payroll Taxes')
+                vacation_liability_val = get_cost('Accrued Vacation Liability')
+                paid_vacation_val = get_cost('Paid Vacation')
+                sick_leave_val = get_cost('Sick Leave Paid')
+                medical_insurance_val = get_cost('Medical Insurance')
+                bonus_val = get_cost('Unconditional Bonus')
+
+                # Get associated hours
+                direct_hours_val = get_cost('Hours Direct')
+                sick_hours_val = get_cost('Sick Leave Hours')
+
+                # New Rule: Discrepancies & corrections from previous month
+                if total_hours_direct_val < 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Discrepancies & corrections from previous month',
+                        'DC Hours': total_hours_direct_val,
+                        'Total DL costs': total_dl_costs_val
+                    })
+                    processed_records.append(record)
+                    continue # Skip all other bucketing for this row
+
+                # Handle PM role charge as a special case
+                if 'pm role charge' in employee_ticket.lower():
+                    if total_dl_costs_val != 0:
+                        record = base_record_info.copy()
+                        record.update({
+                            'Bucket': 'PM role charge',
+                            'DC Hours': 0,
+                            'Total DL costs': total_dl_costs_val
+                        })
+                        processed_records.append(record)
+                    continue
+
+                # Rule 5: Paid Overtime (must be checked first as it includes base salary components)
+                if paid_overtime_val > 0:
+                    total_cost = paid_overtime_val + base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
+                    if total_cost > 0:
+                        record = base_record_info.copy()
+                        record.update({
+                            'Bucket': 'Paid overtime',
+                            'DC Hours': direct_hours_val,
+                            'Total DL costs': total_cost
+                        })
+                        processed_records.append(record)
+                else:
+                    # Rule 1: Need clarification (only if not overtime)
+                    total_cost = base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
+                    if total_cost > 0:
+                        record = base_record_info.copy()
+                        record.update({
+                            'Bucket': 'Need clarification',
+                            'DC Hours': direct_hours_val,
+                            'Total DL costs': total_cost
+                        })
+                        processed_records.append(record)
+
+                # Rule 2: Sick leave (independent)
+                if sick_leave_val > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Sick leave',
+                        'DC Hours': sick_hours_val,
+                        'Total DL costs': sick_leave_val
+                    })
+                    processed_records.append(record)
+
+                # Rule 3: Medical Insurance (independent)
+                if medical_insurance_val > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Medical Insurance',
+                        'DC Hours': 0,
+                        'Total DL costs': medical_insurance_val
+                    })
+                    processed_records.append(record)
+
+                # Rule 4: Bonus (independent)
+                if bonus_val > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Bonus',
+                        'DC Hours': 0,
+                        'Total DL costs': bonus_val
+                    })
+                    processed_records.append(record)
+
             except Exception as e:
                 logger.error(f"Error processing DL row {index}: {str(e)}")
                 continue
@@ -446,81 +520,6 @@ class DirectCostProcessor:
 
         return start_row, end_row
 
-    def _determine_bucket_dl(self, row: pd.Series, columns: List[str]) -> str:
-        """
-        Determine the bucket classification for DL Costs records.
-        
-        Args:
-            row: DataFrame row containing employee data
-            columns: List of column names to help identify data
-            
-        Returns:
-            str: Bucket classification
-        """
-        # Get employee/ticket name from first column
-        employee_ticket = str(row.iloc[0] if len(row) > 0 else '').strip()
-        
-        # Rule 1: PM role charge entries
-        if 'PM role charge' in employee_ticket or 'pm role charge' in employee_ticket.lower():
-            return 'PM role charge'
-
-        # Try to find relevant columns for other rules
-        # Using both position-based and name-based approaches
-        total_hours_col = None
-        sick_hours_col = None
-        bonus_col = None
-        total_dl_col = None
-        
-        for i, col in enumerate(columns):
-            col_lower = str(col).lower()
-            
-            # Position-based identification (more reliable for Unnamed columns)
-            if i == 1:  # TOTAL Hours direct
-                total_hours_col = col
-            elif i == 3:  # Hours sick leave paid by project
-                sick_hours_col = col
-            elif i == 9:  # Unconditional Bonus
-                bonus_col = col
-            elif i == 5:  # TOTAL DL costs
-                total_dl_col = col
-            
-            # Name-based identification (fallback)
-            if 'total hours direct' in col_lower:
-                total_hours_col = col
-            elif 'hours sick leave' in col_lower or ('sick leave' in col_lower and 'hours' in col_lower):
-                sick_hours_col = col
-            elif 'unconditional bonus' in col_lower:
-                bonus_col = col
-            elif 'total dl costs' in col_lower:
-                total_dl_col = col
-        
-        # Rule 2: Sick leave - hours in sick leave match hours in total direct
-        if total_hours_col and sick_hours_col:
-            try:
-                total_hours = float(row.get(total_hours_col, 0) or 0)
-                sick_hours = float(row.get(sick_hours_col, 0) or 0)
-                print(f"Employee {employee_ticket}: Total hours = {total_hours}, Sick hours = {sick_hours}")
-                if total_hours > 0 and sick_hours > 0 and abs(total_hours - sick_hours) < 0.01:
-                    return 'Sick leave'
-            except (ValueError, TypeError) as e:
-                print(f"Error processing sick leave rule: {e}")
-                pass
-        
-        # Rule 3: Bonus - amount in unconditional bonus matches amount in total DL
-        if bonus_col and total_dl_col:
-            try:
-                bonus_amount = float(row.get(bonus_col, 0) or 0)
-                total_dl_amount = float(row.get(total_dl_col, 0) or 0)
-                print(f"Employee {employee_ticket}: Bonus = {bonus_amount}, Total DL = {total_dl_amount}")
-                if bonus_amount > 0 and total_dl_amount > 0 and abs(bonus_amount - total_dl_amount) < 0.01:
-                    return 'Bonus'
-            except (ValueError, TypeError) as e:
-                print(f"Error processing bonus rule: {e}")
-                pass
-        
-        # Default bucket for regular employees
-        return 'Regular DL'
-    
     def _determine_bucket_vc(self, employee_ticket: str) -> str:
         """
         Determine the bucket classification for VC Costs records.
@@ -645,17 +644,14 @@ class DirectCostProcessor:
         
         # Reorder columns for better readability
         preferred_order = [
-            'Employee', 'Project', 'Bucket', 'Source',
-            'Total hours direct', 'Sick leave', 'Unconditional bonus',
-            'Total DL', 'TOTAL DL costs', 'Medical insurance'
+            'Employee', 'Project', 'Month', 'Bucket', 
+            'DC Hours', 'Total DL costs'
         ]
         
         # Include only columns that exist in the data
-        columns = [col for col in preferred_order if col in df.columns]
-        remaining_columns = [col for col in df.columns if col not in columns]
-        final_columns = columns + remaining_columns
+        df = df.reindex(columns=preferred_order)
         
-        return df[final_columns]
+        return df
 
 
 class DCMasterFileManager:
