@@ -162,6 +162,13 @@ class DirectCostMasterApp:
                 value='June'
             ).classes('w-full mb-4')
             self.month_select.tooltip('Select the month to process from the P&L file')
+            # Year selection
+            ui.label('Select Year to Process:').classes('text-sm font-medium mb-2')
+            self.year_select = ui.select(
+                options=['2025', '2024', '2023', '2022', '2021', '2020'],
+                value='2025'
+            ).classes('w-full mb-4')
+            self.month_select.tooltip('Select the month to process from the P&L file')
             
             with ui.row().classes('w-full gap-4'):
                 self.process_button = ui.button(
@@ -278,17 +285,19 @@ class DirectCostMasterApp:
         
         try:
             selected_month = self.month_select.value
-            ui.notify(f'Processing P&L file for {selected_month}...', type='info')
+            selected_year = self.year_select.value
+            selected_period = f"{selected_month} {selected_year}"
+            ui.notify(f'Processing P&L file for {selected_period}...', type='info')
             print(self.processor.sheets_data['DL costs (direct)'])
             # Process the current file using our DC processor with selected month
             processed_records = self.dc_processor.process_file_for_month(
                 self.processor.sheets_data, 
                 self.processor.file_name,
-                selected_month
+                selected_period
             )
             
             if not processed_records:
-                ui.notify(f'No data was processed for {selected_month}. Please check the file format and month availability.', type='warning')
+                ui.notify(f'No data was processed for {selected_period}. Please check the file format and month availability.', type='warning')
                 return
             
             # Add processed data to master file

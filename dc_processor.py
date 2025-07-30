@@ -409,14 +409,14 @@ class DirectCostProcessor:
         target_variations = []
         
         # Extract just the month name if year is included
-        month_name = target_month.split()[0] if ' ' in target_month else target_month
-        target_variations.append(month_name.lower())
+        # month_name = target_month.split()[0] if ' ' in target_month else target_month
+        # target_variations.append(month_name.lower())
         target_variations.append(target_month.lower())
         
         # Add year variations if not already included
-        current_year = "2025"  # You can make this dynamic if needed
-        if current_year not in target_month:
-            target_variations.append(f"{month_name.lower()} {current_year}")
+        # current_year = "2025"  # You can make this dynamic if needed
+        # if current_year not in target_month:
+        #     target_variations.append(f"{month_name.lower()} {current_year}")
         
         start_row = None
         end_row = None
