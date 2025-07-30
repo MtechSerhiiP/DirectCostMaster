@@ -280,16 +280,17 @@ class DirectCostProcessor:
                 new_columns.append(f"Unnamed: {i}")
         return new_columns
     
-    def process_vc_costs_direct(self, df: pd.DataFrame, project_name: str) -> List[Dict]:
+    def process_vc_costs_direct(self, df: pd.DataFrame, project_name: str, target_month: str = None) -> List[Dict]:
         """
-        Process data from 'VC Costs (Direct)' tab.
+        Process data from 'VC Costs (Direct)' tab for a specific month.
         
         Args:
             df: DataFrame containing the VC Costs data
             project_name: Name of the project
+            target_month: Month to process (e.g., 'June 2025')
             
         Returns:
-            List of dictionaries containing processed DC records
+            List of dictionaries containing processed VC records
         """
         processed_records = []
         
@@ -297,43 +298,114 @@ class DirectCostProcessor:
             logger.warning("VC Costs (Direct) data is empty")
             return processed_records
         
-        # Expected columns based on process description
-        required_columns = ['Employee/Ticket', 'TOTAL']
+        # Log the actual columns found in the data
+        logger.info(f"Initial VC DataFrame columns: {list(df.columns)}")
         
-        # Check if required columns exist
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            logger.warning(f"Missing columns in VC Costs: {missing_columns}")
+        # Find the section for the target month
+        month_header_row, month_end_row = self._find_month_section(df, target_month)
         
-        for index, row in df.iterrows():
+        if month_header_row is None:
+            logger.warning(f"Month section '{target_month}' not found in VC Costs data")
+            return processed_records
+        
+        logger.info(f"Processing VC month '{target_month}' from rows {month_header_row} to {month_end_row}")
+        
+        # The actual headers are in the row immediately following the month header
+        header_row_index = month_header_row
+        
+        # Extract the headers for this specific month section
+        month_headers = self._extract_headers_from_row(df.iloc[header_row_index])
+        
+        # The data starts on the row after the headers
+        data_start_row = header_row_index + 1
+        
+        # Create a temporary DataFrame for this month's data with correct headers
+        month_data = df.iloc[data_start_row:month_end_row].copy()
+        month_data.columns = month_headers
+        month_data = month_data.reset_index(drop=True)
+        
+        logger.info(f"Processing VC month '{target_month}' with headers: {month_headers}")
+        
+        # Process each row of data for this month
+        for index, row in month_data.iterrows():
             try:
-                # Skip empty rows
-                if pd.isna(row.get('Employee/Ticket', '')):
+                # Skip empty rows - check first column (Items)
+                first_col_value = row.iloc[0] if len(row) > 0 else None
+                if pd.isna(first_col_value) or str(first_col_value).strip() == '':
+                    continue
+                    
+                # Skip total rows within the month data
+                first_col_str = str(first_col_value).strip()
+                logger.debug(f"Processing VC row {index}: {first_col_str}")
+                
+                if 'total' in first_col_str.lower():
+                    logger.debug(f"Skipping total row: {first_col_str}")
                     continue
                 
-                employee_ticket = str(row['Employee/Ticket']).strip()
+                item_name = first_col_str
                 
-                # Create base record
-                record = {
-                    'Employee': employee_ticket,
+                # Base info for all generated records from this row
+                base_record_info = {
+                    'Item': item_name,
                     'Project': project_name,
-                    'TOTAL DL costs': row.get('TOTAL', 0),
-                    'Bucket': self._determine_bucket_vc(employee_ticket),
-                    'Source': 'VC Costs (Direct)'
+                    'Month': target_month,
+                    'DC Hours': 0  # Always 0 for VC costs
                 }
                 
-                # Copy other columns that might be present
-                for col in df.columns:
-                    if col not in record and col != 'Employee/Ticket':
-                        record[col] = row.get(col, '')
+                # Map original column names to standard names for VC
+                column_mapping = self._create_vc_column_mapping(month_data.columns)
+                reverse_column_mapping = {v: k for k, v in column_mapping.items()}
+
+                def get_vc_cost(standard_name):
+                    col = reverse_column_mapping.get(standard_name)
+                    return float(row.get(col, 0) or 0) if col else 0
+
+                # Get all potential cost values
+                recruiting_costs_val = get_vc_cost('VC.Recruiting Costs')
+                hw_nonresellable_val = get_vc_cost('VC.HW-Nonresellable')
+                sw_nonresellable_val = get_vc_cost('VC.SW-Nonresellable')
+                travel_val = get_vc_cost('VC.Travel')
+                communications_val = get_vc_cost('VC.Communications')
+                other_direct_val = get_vc_cost('VC.Other.Direct')
+
+                # Check for negative values (Discrepancies & corrections)
+                all_values = [recruiting_costs_val, hw_nonresellable_val, sw_nonresellable_val, 
+                             travel_val, communications_val, other_direct_val]
                 
-                processed_records.append(record)
-                
+                if any(val < 0 for val in all_values):
+                    total_cost = sum(all_values)
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Discrepancies & corrections from previous month',
+                        'Total DL costs': total_cost
+                    })
+                    processed_records.append(record)
+                    continue
+
+                # Rule 1: Recruiting cost
+                if recruiting_costs_val > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Recruiting cost',
+                        'Total DL costs': recruiting_costs_val
+                    })
+                    processed_records.append(record)
+
+                # Rule 2: DC - other DC (combine all other direct costs)
+                other_dc_total = hw_nonresellable_val + sw_nonresellable_val + travel_val + communications_val + other_direct_val
+                if other_dc_total > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'DC - other DC',
+                        'Total DL costs': other_dc_total
+                    })
+                    processed_records.append(record)
+
             except Exception as e:
                 logger.error(f"Error processing VC row {index}: {str(e)}")
                 continue
         
-        logger.info(f"Processed {len(processed_records)} VC Cost records")
+        logger.info(f"Processed {len(processed_records)} VC Cost records for {target_month}")
         return processed_records
     
     def _create_column_mapping(self, columns: List[str]) -> Dict[str, str]:
@@ -392,6 +464,89 @@ class DirectCostProcessor:
                 mapping[col] = col
         
         return mapping
+    
+    def _create_vc_column_mapping(self, columns: List[str]) -> Dict[str, str]:
+        """
+        Create a mapping from actual VC column names to standardized names.
+        
+        Args:
+            columns: List of actual column names from the VC DataFrame
+            
+        Returns:
+            Dict mapping original column names to standard names
+        """
+        mapping = {}
+        
+        # Expected VC column positions
+        expected_vc_positions = {
+            0: 'Items',
+            1: 'TicketID', 
+            2: 'TOTAL',
+            3: 'VC.HW-Nonresellable',
+            4: 'VC.SW-Nonresellable',
+            5: 'VC.Travel',
+            6: 'VC.Communications',
+            7: 'VC.Recruiting Costs',
+            8: 'VC.Other.Direct'
+        }
+        
+        for i, col in enumerate(columns):
+            col_str = str(col).strip()
+            col_lower = col_str.lower()
+            
+            # Skip the first column (Items) as it's handled separately
+            if i == 0:
+                continue
+            
+            # Handle Unnamed columns by position
+            if 'unnamed' in col_lower or col_str.startswith('Unnamed'):
+                if i in expected_vc_positions:
+                    standard_name = expected_vc_positions[i]
+                    mapping[col] = standard_name
+                continue
+            
+            # Handle named columns
+            standard_name = self._map_vc_named_column(col_str)
+            if standard_name:
+                mapping[col] = standard_name
+            else:
+                # Keep original column name for unmapped columns
+                mapping[col] = col
+        
+        return mapping
+    
+    def _map_vc_named_column(self, col_name: str) -> Optional[str]:
+        """
+        Map a VC named column to its standard name.
+        
+        Args:
+            col_name: Original VC column name
+            
+        Returns:
+            Standard column name or None if not recognized
+        """
+        col_lower = col_name.lower().strip()
+        
+        if 'items' in col_lower:
+            return None  # Skip items column as it's handled separately
+        elif 'ticketid' in col_lower or 'ticket id' in col_lower:
+            return 'TicketID'
+        elif col_lower == 'total':
+            return 'TOTAL'
+        elif 'vc.hw-nonresellable' in col_lower or 'hw-nonresellable' in col_lower:
+            return 'VC.HW-Nonresellable'
+        elif 'vc.sw-nonresellable' in col_lower or 'sw-nonresellable' in col_lower:
+            return 'VC.SW-Nonresellable'
+        elif 'vc.travel' in col_lower or col_lower == 'travel':
+            return 'VC.Travel'
+        elif 'vc.communications' in col_lower or 'communications' in col_lower:
+            return 'VC.Communications'
+        elif 'vc.recruiting costs' in col_lower or 'recruiting costs' in col_lower:
+            return 'VC.Recruiting Costs'
+        elif 'vc.other.direct' in col_lower or 'other.direct' in col_lower:
+            return 'VC.Other.Direct'
+        else:
+            return None
     
     def _get_standard_name_for_position(self, position: int) -> Optional[str]:
         """
@@ -569,13 +724,13 @@ class DirectCostProcessor:
         else:
             logger.warning("DL Costs (Direct) sheet not found")
         
-        # # Process VC Costs (Direct) tab
-        # vc_sheet_name = self._find_sheet_by_pattern(sheets_data.keys(), ['VC Costs (Direct)', 'VC Costs', 'Variable Costs'])
-        # if vc_sheet_name:
-        #     vc_records = self.process_vc_costs_direct(sheets_data[vc_sheet_name], project_name)
-        #     all_records.extend(vc_records)
-        # else:
-        #     logger.warning("VC Costs (Direct) sheet not found")
+        # Process VC Costs (Direct) tab
+        vc_sheet_name = self._find_sheet_by_pattern(sheets_data.keys(), ['VC Costs (Direct)', 'VC Costs', 'Variable Costs'])
+        if vc_sheet_name:
+            vc_records = self.process_vc_costs_direct(sheets_data[vc_sheet_name], project_name, target_month)
+            all_records.extend(vc_records)
+        else:
+            logger.warning("VC Costs (Direct) sheet not found")
         
         logger.info(f"Processed complete file '{filename}': {len(all_records)} total records for {target_month}")
         return all_records
@@ -606,6 +761,14 @@ class DirectCostProcessor:
             all_records.extend(dl_records)
         else:
             logger.warning("DL Costs (Direct) sheet not found")
+
+        # Process VC Costs (Direct) tab
+        vc_sheet_name = self._find_sheet_by_pattern(sheets_data.keys(), ['VC Costs (Direct)', 'VC Costs', 'Variable Costs'])
+        if vc_sheet_name:
+            vc_records = self.process_vc_costs_direct(sheets_data[vc_sheet_name], project_name, target_month)
+            all_records.extend(vc_records)
+        else:
+            logger.warning("VC Costs (Direct) sheet not found")
         
         logger.info(f"Processed file '{filename}': {len(all_records)} total records for {target_month}")
         return all_records
@@ -627,31 +790,38 @@ class DirectCostProcessor:
                     return sheet_name
         return None
     
-    def export_to_dataframe(self, records: List[Dict]) -> pd.DataFrame:
+    def export_to_dataframe(self, records: List[Dict]) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Convert processed records to a pandas DataFrame for export.
+        Convert processed records to pandas DataFrames for export, separating DL and VC data.
         
         Args:
             records: List of processed record dictionaries
             
         Returns:
-            pd.DataFrame: Consolidated DataFrame with all records
+            Tuple of (DL DataFrame, VC DataFrame)
         """
         if not records:
-            return pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame()
         
-        df = pd.DataFrame(records)
+        # Separate DL and VC records based on presence of 'Employee' vs 'Item' field
+        dl_records = [r for r in records if 'Employee' in r]
+        vc_records = [r for r in records if 'Item' in r]
         
-        # Reorder columns for better readability
-        preferred_order = [
-            'Employee', 'Project', 'Month', 'Bucket', 
-            'DC Hours', 'Total DL costs'
-        ]
+        # Create DL DataFrame
+        dl_df = pd.DataFrame()
+        if dl_records:
+            dl_df = pd.DataFrame(dl_records)
+            dl_preferred_order = ['Employee', 'Project', 'Month', 'Bucket', 'DC Hours', 'Total DL costs']
+            dl_df = dl_df.reindex(columns=dl_preferred_order)
         
-        # Include only columns that exist in the data
-        df = df.reindex(columns=preferred_order)
+        # Create VC DataFrame  
+        vc_df = pd.DataFrame()
+        if vc_records:
+            vc_df = pd.DataFrame(vc_records)
+            vc_preferred_order = ['Item', 'Project', 'Month', 'Bucket', 'DC Hours', 'Total DL costs']
+            vc_df = vc_df.reindex(columns=vc_preferred_order)
         
-        return df
+        return dl_df, vc_df
 
 
 class DCMasterFileManager:
@@ -661,7 +831,8 @@ class DCMasterFileManager:
     """
     
     def __init__(self):
-        self.master_data = pd.DataFrame()
+        self.master_dl_data = pd.DataFrame()
+        self.master_vc_data = pd.DataFrame()
     
     def add_project_data(self, project_records: List[Dict]):
         """
@@ -673,27 +844,53 @@ class DCMasterFileManager:
         if not project_records:
             return
         
-        project_df = pd.DataFrame(project_records)
+        # Separate DL and VC records
+        dl_records = [r for r in project_records if 'Employee' in r]
+        vc_records = [r for r in project_records if 'Item' in r]
         
-        if self.master_data.empty:
-            self.master_data = project_df
-        else:
-            self.master_data = pd.concat([self.master_data, project_df], ignore_index=True)
+        # Add DL records
+        if dl_records:
+            project_dl_df = pd.DataFrame(dl_records)
+            if self.master_dl_data.empty:
+                self.master_dl_data = project_dl_df
+            else:
+                self.master_dl_data = pd.concat([self.master_dl_data, project_dl_df], ignore_index=True)
         
-        logger.info(f"Added {len(project_records)} records to master file. Total records: {len(self.master_data)}")
+        # Add VC records
+        if vc_records:
+            project_vc_df = pd.DataFrame(vc_records)
+            if self.master_vc_data.empty:
+                self.master_vc_data = project_vc_df
+            else:
+                self.master_vc_data = pd.concat([self.master_vc_data, project_vc_df], ignore_index=True)
+        
+        logger.info(f"Added {len(dl_records)} DL and {len(vc_records)} VC records to master file. Total: {len(self.master_dl_data)} DL, {len(self.master_vc_data)} VC")
+    
+    def get_master_dataframes(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """Get the current master DataFrames."""
+        return self.master_dl_data.copy(), self.master_vc_data.copy()
     
     def get_master_dataframe(self) -> pd.DataFrame:
-        """Get the current master DataFrame."""
-        return self.master_data.copy()
+        """Get the current master DataFrame (legacy method - returns combined data)."""
+        if self.master_dl_data.empty and self.master_vc_data.empty:
+            return pd.DataFrame()
+        elif self.master_dl_data.empty:
+            return self.master_vc_data.copy()
+        elif self.master_vc_data.empty:
+            return self.master_dl_data.copy()
+        else:
+            # Combine both datasets
+            return pd.concat([self.master_dl_data, self.master_vc_data], ignore_index=True)
     
     def clear_master_data(self):
         """Clear all data from the master file."""
-        self.master_data = pd.DataFrame()
+        self.master_dl_data = pd.DataFrame()
+        self.master_vc_data = pd.DataFrame()
         logger.info("Master data cleared")
     
     def export_to_excel(self, output_path: str = None) -> bytes:
         """
-        Export master data to Excel format.
+        Export master data to Excel format with separate sheets for DL and VC data.
         
         Args:
             output_path: Optional file path to save to disk
@@ -701,28 +898,48 @@ class DCMasterFileManager:
         Returns:
             bytes: Excel file content as bytes (for download)
         """
-        if self.master_data.empty:
+        if self.master_dl_data.empty and self.master_vc_data.empty:
             raise ValueError("No data to export")
         
         # Create Excel file in memory
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            self.master_data.to_excel(writer, sheet_name='DC Master Data', index=False)
+            # Export DL data if available
+            if not self.master_dl_data.empty:
+                self.master_dl_data.to_excel(writer, sheet_name='DL Costs Master Data', index=False)
+                
+                # Auto-adjust column widths for DL sheet
+                dl_worksheet = writer.sheets['DL Costs Master Data']
+                for column in dl_worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    dl_worksheet.column_dimensions[column_letter].width = adjusted_width
             
-            # Auto-adjust column widths
-            worksheet = writer.sheets['DC Master Data']
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
+            # Export VC data if available
+            if not self.master_vc_data.empty:
+                self.master_vc_data.to_excel(writer, sheet_name='VC Costs Master Data', index=False)
+                
+                # Auto-adjust column widths for VC sheet
+                vc_worksheet = writer.sheets['VC Costs Master Data']
+                for column in vc_worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    vc_worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
         excel_bytes = output.getvalue()

@@ -321,10 +321,20 @@ class DirectCostMasterApp:
     
     def update_results_display(self):
         """Update the results display with current master data."""
-        master_df = self.master_manager.get_master_dataframe()
+        # Get both DL and VC dataframes
+        master_dl_df, master_vc_df = self.master_manager.get_master_dataframes()
         
-        if master_df.empty:
+        # Combine for display purposes
+        combined_dfs = []
+        if not master_dl_df.empty:
+            combined_dfs.append(master_dl_df)
+        if not master_vc_df.empty:
+            combined_dfs.append(master_vc_df)
+        
+        if not combined_dfs:
             return
+            
+        master_df = pd.concat(combined_dfs, ignore_index=True) if len(combined_dfs) > 1 else combined_dfs[0]
         
         # Show results card
         self.results_card.classes(remove='hidden')
@@ -333,8 +343,9 @@ class DirectCostMasterApp:
         total_records = len(master_df)
         unique_projects = master_df['Project'].nunique() if 'Project' in master_df.columns else 0
         unique_employees = master_df['Employee'].nunique() if 'Employee' in master_df.columns else 0
+        unique_items = master_df['Item'].nunique() if 'Item' in master_df.columns else 0
         
-        summary_text = f"Total Records: {total_records} | Projects: {unique_projects} | Employees: {unique_employees}"
+        summary_text = f"Total Records: {total_records} | Projects: {unique_projects} | Employees: {unique_employees} | Items: {unique_items}"
         self.results_summary.set_text(summary_text)
         
         # Update results table (show first 50 rows for preview)
@@ -349,7 +360,9 @@ class DirectCostMasterApp:
     def download_master_file(self):
         """Generate and download the master DC file."""
         try:
-            if self.master_manager.master_data.empty:
+            master_dl_df, master_vc_df = self.master_manager.get_master_dataframes()
+            
+            if master_dl_df.empty and master_vc_df.empty:
                 ui.notify('No data to download. Process some files first.', type='warning')
                 return
             
