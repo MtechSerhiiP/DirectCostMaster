@@ -83,17 +83,25 @@ class DirectCostMasterApp:
         self.processor = ExcelProcessor()
         self.dc_processor = DirectCostProcessor()
         self.master_manager = DCMasterFileManager()
-        self.current_sheet = None
         
         # UI components references
         self.upload_area = None
         self.file_info_card = None
         self.sheets_select = None
-        self.data_preview = None
         self.process_button = None
         self.download_button = None
         self.results_card = None
         self.month_select = None
+        self.year_select = None
+        
+        # Results components for tabs
+        self.results_summary = None
+        self.dl_tab = None
+        self.vc_tab = None
+        self.dl_summary = None
+        self.vc_summary = None
+        self.dl_results_table = None
+        self.vc_results_table = None
         
     def create_header(self):
         """Create the application header with title and description."""
@@ -133,21 +141,6 @@ class DirectCostMasterApp:
             # File details
             self.file_name_label = ui.label().classes('text-sm text-gray-600 mb-2')
             self.sheets_count_label = ui.label().classes('text-sm text-gray-600 mb-4')
-            
-            # Sheet selection
-            ui.label('Select Sheet to Preview:').classes('text-sm font-medium mb-2')
-            self.sheets_select = ui.select(
-                options=[],
-                on_change=self.on_sheet_selected
-            ).classes('w-full mb-4')
-    
-    def create_data_preview_section(self):
-        """Create the data preview section."""
-        self.data_preview = ui.card().classes('w-full max-w-6xl mx-auto p-6 shadow-lg mt-6 hidden')
-        
-        with self.data_preview:
-            ui.label('Data Preview').classes('text-xl font-semibold mb-4')
-            self.preview_table = ui.table(columns=[], rows=[]).classes('w-full')
     
     def create_process_section(self):
         """Create the data processing controls section."""
@@ -188,8 +181,8 @@ class DirectCostMasterApp:
             ui.label('This will process the Excel data according to the Direct Cost Master workflow for the selected month.').classes('text-sm text-gray-500 mt-2')
     
     def create_results_section(self):
-        """Create the results and download section."""
-        self.results_card = ui.card().classes('w-full max-w-4xl mx-auto p-6 shadow-lg mt-6 hidden')
+        """Create the results and download section with separate tabs for DL and VC data."""
+        self.results_card = ui.card().classes('w-full max-w-6xl mx-auto p-6 shadow-lg mt-6 hidden')
         
         with self.results_card:
             ui.label('Processing Results').classes('text-xl font-semibold mb-4')
@@ -203,8 +196,23 @@ class DirectCostMasterApp:
                 on_click=self.download_master_file
             ).classes('bg-green-500 hover:bg-green-600 text-white font-semibold py-3 px-6 rounded-lg mb-4')
             
-            # Results table
-            self.results_table = ui.table(columns=[], rows=[]).classes('w-full')
+            # Create tabs for DL and VC data
+            with ui.tabs().classes('w-full') as tabs:
+                self.dl_tab = ui.tab('DL Costs', icon='people')
+                self.vc_tab = ui.tab('VC Costs', icon='inventory')
+            
+            with ui.tab_panels(tabs, value=self.dl_tab).classes('w-full'):
+                # DL Costs tab panel
+                with ui.tab_panel(self.dl_tab):
+                    ui.label('Direct Labor Costs').classes('text-lg font-medium mb-3')
+                    self.dl_summary = ui.label().classes('text-sm text-gray-600 mb-3')
+                    self.dl_results_table = ui.table(columns=[], rows=[]).classes('w-full')
+                
+                # VC Costs tab panel  
+                with ui.tab_panel(self.vc_tab):
+                    ui.label('Variable Costs').classes('text-lg font-medium mb-3')
+                    self.vc_summary = ui.label().classes('text-sm text-gray-600 mb-3')
+                    self.vc_results_table = ui.table(columns=[], rows=[]).classes('w-full')
     
     def handle_file_upload(self, event):
         """
@@ -241,38 +249,8 @@ class DirectCostMasterApp:
         sheet_names = self.processor.get_sheet_names()
         self.sheets_count_label.set_text(f'Sheets found: {len(sheet_names)}')
         
-        # Update sheet selection dropdown
-        self.sheets_select.set_options(sheet_names)
-        if sheet_names:
-            self.sheets_select.set_value(sheet_names[0])
-            self.on_sheet_selected()
-        
         # Enable processing button
         self.process_button.set_enabled(True)
-    
-    def on_sheet_selected(self):
-        """Handle sheet selection change."""
-        if not self.sheets_select.value:
-            return
-            
-        self.current_sheet = self.sheets_select.value
-        
-        # Get preview data
-        preview_data = self.processor.get_sheet_preview(self.current_sheet, rows=5)
-        
-        if preview_data is not None:
-            # Show preview card
-            self.data_preview.classes(remove='hidden')
-            
-            # Update table with preview data
-            columns = [{'name': col, 'label': col, 'field': col} for col in preview_data.columns]
-            rows = preview_data.fillna('').to_dict('records')
-            
-            self.preview_table.columns = columns
-            self.preview_table.rows = rows
-            self.preview_table.update()
-            
-            logger.info(f"Sheet preview updated: {self.current_sheet}")
     
     def process_data(self):
         """
@@ -324,38 +302,66 @@ class DirectCostMasterApp:
         # Get both DL and VC dataframes
         master_dl_df, master_vc_df = self.master_manager.get_master_dataframes()
         
-        # Combine for display purposes
-        combined_dfs = []
-        if not master_dl_df.empty:
-            combined_dfs.append(master_dl_df)
-        if not master_vc_df.empty:
-            combined_dfs.append(master_vc_df)
-        
-        if not combined_dfs:
+        # Check if we have any data
+        if master_dl_df.empty and master_vc_df.empty:
             return
             
-        master_df = pd.concat(combined_dfs, ignore_index=True) if len(combined_dfs) > 1 else combined_dfs[0]
-        
         # Show results card
         self.results_card.classes(remove='hidden')
         
-        # Update summary
-        total_records = len(master_df)
-        unique_projects = master_df['Project'].nunique() if 'Project' in master_df.columns else 0
-        unique_employees = master_df['Employee'].nunique() if 'Employee' in master_df.columns else 0
-        unique_items = master_df['Item'].nunique() if 'Item' in master_df.columns else 0
+        # Update overall summary
+        total_dl_records = len(master_dl_df) if not master_dl_df.empty else 0
+        total_vc_records = len(master_vc_df) if not master_vc_df.empty else 0
+        total_records = total_dl_records + total_vc_records
         
-        summary_text = f"Total Records: {total_records} | Projects: {unique_projects} | Employees: {unique_employees} | Items: {unique_items}"
+        unique_projects = 0
+        if not master_dl_df.empty and 'Project' in master_dl_df.columns:
+            unique_projects = max(unique_projects, master_dl_df['Project'].nunique())
+        if not master_vc_df.empty and 'Project' in master_vc_df.columns:
+            unique_projects = max(unique_projects, master_vc_df['Project'].nunique())
+        
+        summary_text = f"Total Records: {total_records} | DL Records: {total_dl_records} | VC Records: {total_vc_records} | Projects: {unique_projects}"
         self.results_summary.set_text(summary_text)
         
-        # Update results table (show first 50 rows for preview)
-        preview_df = master_df.head(50)
-        columns = [{'name': col, 'label': col, 'field': col} for col in preview_df.columns]
-        rows = preview_df.fillna('').to_dict('records')
+        # Update DL Costs tab
+        if not master_dl_df.empty:
+            unique_employees = master_dl_df['Employee'].nunique() if 'Employee' in master_dl_df.columns else 0
+            dl_summary_text = f"DL Records: {total_dl_records} | Employees: {unique_employees}"
+            self.dl_summary.set_text(dl_summary_text)
+            
+            # Update DL table (show first 50 rows for preview)
+            dl_preview_df = master_dl_df.head(50)
+            dl_columns = [{'name': col, 'label': col, 'field': col} for col in dl_preview_df.columns]
+            dl_rows = dl_preview_df.fillna('').to_dict('records')
+            
+            self.dl_results_table.columns = dl_columns
+            self.dl_results_table.rows = dl_rows
+            self.dl_results_table.update()
+        else:
+            self.dl_summary.set_text("No DL Cost data available")
+            self.dl_results_table.columns = []
+            self.dl_results_table.rows = []
+            self.dl_results_table.update()
         
-        self.results_table.columns = columns
-        self.results_table.rows = rows
-        self.results_table.update()
+        # Update VC Costs tab
+        if not master_vc_df.empty:
+            unique_items = master_vc_df['Item'].nunique() if 'Item' in master_vc_df.columns else 0
+            vc_summary_text = f"VC Records: {total_vc_records} | Items: {unique_items}"
+            self.vc_summary.set_text(vc_summary_text)
+            
+            # Update VC table (show first 50 rows for preview)
+            vc_preview_df = master_vc_df.head(50)
+            vc_columns = [{'name': col, 'label': col, 'field': col} for col in vc_preview_df.columns]
+            vc_rows = vc_preview_df.fillna('').to_dict('records')
+            
+            self.vc_results_table.columns = vc_columns
+            self.vc_results_table.rows = vc_rows
+            self.vc_results_table.update()
+        else:
+            self.vc_summary.set_text("No VC Cost data available")
+            self.vc_results_table.columns = []
+            self.vc_results_table.rows = []
+            self.vc_results_table.update()
     
     def download_master_file(self):
         """Generate and download the master DC file."""
@@ -403,7 +409,6 @@ class DirectCostMasterApp:
             self.create_header()
             self.create_upload_section()
             self.create_file_info_section()
-            self.create_data_preview_section()
             self.create_process_section()
             self.create_results_section()
     

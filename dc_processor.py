@@ -160,7 +160,11 @@ class DirectCostProcessor:
 
                 def get_cost(standard_name):
                     col = reverse_column_mapping.get(standard_name)
-                    return float(row.get(col, 0) or 0) if col else 0
+                    value = float(row.get(col, 0) or 0) if col else 0
+                    # Round Total DL Costs to 2 decimal places
+                    if standard_name == 'Total DL Costs':
+                        return round(value, 2)
+                    return value
 
                 # Get all potential cost values
                 total_hours_direct_val = get_cost('Total Hours Direct')
@@ -184,7 +188,7 @@ class DirectCostProcessor:
                     record.update({
                         'Bucket': 'Discrepancies & corrections from previous month',
                         'DC Hours': total_hours_direct_val,
-                        'Total DL costs': total_dl_costs_val
+                        'Total DL costs': round(total_dl_costs_val, 2)
                     })
                     processed_records.append(record)
                     continue # Skip all other bucketing for this row
@@ -196,7 +200,7 @@ class DirectCostProcessor:
                         record.update({
                             'Bucket': 'PM role charge',
                             'DC Hours': 0,
-                            'Total DL costs': total_dl_costs_val
+                            'Total DL costs': round(total_dl_costs_val, 2)
                         })
                         processed_records.append(record)
                     continue
@@ -204,6 +208,7 @@ class DirectCostProcessor:
                 # Rule 5: Paid Overtime (must be checked first as it includes base salary components)
                 if paid_overtime_val > 0:
                     total_cost = paid_overtime_val + base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
+                    total_cost = round(total_cost, 2)  # Round to 2 decimal places
                     if total_cost > 0:
                         record = base_record_info.copy()
                         record.update({
@@ -215,6 +220,7 @@ class DirectCostProcessor:
                 else:
                     # Rule 1: Need clarification (only if not overtime)
                     total_cost = base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
+                    total_cost = round(total_cost, 2)  # Round to 2 decimal places
                     if total_cost > 0:
                         record = base_record_info.copy()
                         record.update({
@@ -230,7 +236,7 @@ class DirectCostProcessor:
                     record.update({
                         'Bucket': 'Sick leave',
                         'DC Hours': sick_hours_val,
-                        'Total DL costs': sick_leave_val
+                        'Total DL costs': round(sick_leave_val, 2)
                     })
                     processed_records.append(record)
 
@@ -240,7 +246,7 @@ class DirectCostProcessor:
                     record.update({
                         'Bucket': 'Medical Insurance',
                         'DC Hours': 0,
-                        'Total DL costs': medical_insurance_val
+                        'Total DL costs': round(medical_insurance_val, 2)
                     })
                     processed_records.append(record)
 
@@ -250,7 +256,7 @@ class DirectCostProcessor:
                     record.update({
                         'Bucket': 'Bonus',
                         'DC Hours': 0,
-                        'Total DL costs': bonus_val
+                        'Total DL costs': round(bonus_val, 2)
                     })
                     processed_records.append(record)
 
@@ -358,7 +364,9 @@ class DirectCostProcessor:
 
                 def get_vc_cost(standard_name):
                     col = reverse_column_mapping.get(standard_name)
-                    return float(row.get(col, 0) or 0) if col else 0
+                    value = float(row.get(col, 0) or 0) if col else 0
+                    # Round all VC cost values to 2 decimal places
+                    return round(value, 2)
 
                 # Get all potential cost values
                 recruiting_costs_val = get_vc_cost('VC.Recruiting Costs')
@@ -374,6 +382,7 @@ class DirectCostProcessor:
                 
                 if any(val < 0 for val in all_values):
                     total_cost = sum(all_values)
+                    total_cost = round(total_cost, 2)  # Round to 2 decimal places
                     record = base_record_info.copy()
                     record.update({
                         'Bucket': 'Discrepancies & corrections from previous month',
@@ -387,12 +396,13 @@ class DirectCostProcessor:
                     record = base_record_info.copy()
                     record.update({
                         'Bucket': 'Recruiting cost',
-                        'Total DL costs': recruiting_costs_val
+                        'Total DL costs': round(recruiting_costs_val, 2)
                     })
                     processed_records.append(record)
 
                 # Rule 2: DC - other DC (combine all other direct costs)
                 other_dc_total = hw_nonresellable_val + sw_nonresellable_val + travel_val + communications_val + other_direct_val
+                other_dc_total = round(other_dc_total, 2)  # Round to 2 decimal places
                 if other_dc_total > 0:
                     record = base_record_info.copy()
                     record.update({
