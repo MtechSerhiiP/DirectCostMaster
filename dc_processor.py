@@ -194,12 +194,12 @@ class DirectCostProcessor:
                     continue # Skip all other bucketing for this row
 
                 # Handle PM role charge as a special case
-                if 'pm role charge' in employee_ticket.lower():
-                    if total_dl_costs_val != 0:
+                if 'pm role charge' in employee_ticket.lower() or 'pm charge role' in employee_ticket.lower():
+                    if total_dl_costs_val > 0:
                         record = base_record_info.copy()
                         record.update({
                             'Bucket': 'PM role charge',
-                            'DC Hours': 0,
+                            'DC Hours': direct_hours_val,
                             'Total DL costs': round(total_dl_costs_val, 2)
                         })
                         processed_records.append(record)
