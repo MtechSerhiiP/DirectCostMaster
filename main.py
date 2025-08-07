@@ -823,18 +823,53 @@ class DirectCostMasterApp:
                 self.create_process_section()
                 self.create_results_section()
 
-host = '127.0.0.1'
-port = 8080
-app = DirectCostMasterApp()
-try:
-    db_config.create_tables()
-    logger.info("Database initialized successfully")
-except Exception as e:
-    logger.error(f"Database initialization failed: {str(e)}")
-    print("⚠️  Database connection failed. Please check your PostgreSQL setup.")
-    print("   Run 'python init_db.py' to initialize the database.")
+    def run(self, host: str = '127.0.0.1', port: int = 8080):
+        """Run the application with proper initialization and error handling."""
+        # Initialize database with proper error handling
+        database_available = False
+        try:
+            db_config.create_tables()
+            logger.info("Database initialized successfully")
+            database_available = True
+        except Exception as e:
+            logger.error(f"Database initialization failed: {str(e)}")
+            print("⚠️  Database connection failed. Please check your PostgreSQL setup.")
+            print("   Run 'python init_db.py' to initialize the database.")
+            print("   Application will start in read-only mode without data persistence.")
+        
+        # Store database status for UI feedback
+        self.database_available = database_available
+        
+        # Create UI with database status awareness
+        self.create_ui()
+        
+        logger.info(f"Starting Direct Cost Master application on {host}:{port}")
+        logger.info(f"Database status: {'Available' if database_available else 'Unavailable - Read-only mode'}")
+        ui.run(host=host, port=port, title='Direct Cost Master', favicon='📊')
 
-app.create_ui()
+# 
+# host = '127.0.0.1'
+# port = 8080
+# app = DirectCostMasterApp()
+# try:
+#     db_config.create_tables()
+#     logger.info("Database initialized successfully")
+# except Exception as e:
+#     logger.error(f"Database initialization failed: {str(e)}")
+#     print("⚠️  Database connection failed. Please check your PostgreSQL setup.")
+#     print("   Run 'python init_db.py' to initialize the database.")
 
-logger.info(f"Starting Direct Cost Master application on {host}:{port}")
-ui.run(host=host, port=port, title='Direct Cost Master', favicon='📊')
+# app.create_ui()
+
+# logger.info(f"Starting Direct Cost Master application on {host}:{port}")
+# ui.run(host=host, port=port, title='Direct Cost Master', favicon='📊')
+
+# Initialize and run application with proper error handling
+if __name__ in {"__main__", "__mp_main__"}:
+    try:
+        app = DirectCostMasterApp()
+        app.run()
+    except Exception as e:
+        logger.critical(f"Failed to start application: {str(e)}")
+        print(f"❌ Application startup failed: {str(e)}")
+        print("Please check the logs and configuration.")
