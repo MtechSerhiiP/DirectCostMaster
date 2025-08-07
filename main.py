@@ -2,17 +2,26 @@
 Direct Cost Master - Excel File Processing Application
 A modern, minimalist web interface for processing Excel files with Direct Cost data.
 Built with NiceGUI for a clean and responsive user experience.
+Includes PostgreSQL database integration with user authentication.
 """
 
 import io
+import os
 from pdb import run
 import pandas as pd
 from nicegui import ui, app
 from typing import Optional, Dict, Any
 import logging
+from dotenv import load_dotenv
 
-# Import our custom processor
+# Import our custom modules
 from dc_processor import DirectCostProcessor, DCMasterFileManager
+from auth import auth_service
+from database_service import db_service
+from models import db_config
+
+# Load environment variables
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -109,13 +118,18 @@ class ExcelProcessor:
 class DirectCostMasterApp:
     """
     Main application class for Direct Cost Master.
-    Handles the user interface and file processing workflow.
+    Handles the user interface, authentication, and file processing workflow.
     """
     
     def __init__(self):
         self.processor = ExcelProcessor()
         self.dc_processor = DirectCostProcessor()
         self.master_manager = DCMasterFileManager()
+        
+        # Authentication state
+        self.current_user = None
+        self.session_token = None
+        self.is_authenticated = False
         
         # UI components references
         self.upload_area = None
@@ -127,6 +141,18 @@ class DirectCostMasterApp:
         self.results_card = None
         self.month_select = None
         self.year_select = None
+        
+        # Authentication UI components
+        self.login_card = None
+        self.register_card = None
+        self.user_info_card = None
+        self.login_username = None
+        self.login_password = None
+        self.register_username = None
+        self.register_email = None
+        self.register_password = None
+        self.register_first_name = None
+        self.register_last_name = None
         
         # Files management
         self.files_list_table = None
@@ -141,6 +167,9 @@ class DirectCostMasterApp:
         self.dl_results_table = None
         self.vc_results_table = None
         
+        # Main content container
+        self.main_content = None
+        
     def create_header(self):
         """Create the application header with title and description."""
         with ui.row().classes('w-full justify-center mb-8'):
@@ -148,6 +177,202 @@ class DirectCostMasterApp:
                 ui.label('Direct Cost Master').classes('text-4xl font-bold text-blue-600 mb-2')
                 ui.label('Excel File Processing Application').classes('text-lg text-gray-600')
                 ui.separator().classes('w-24 mx-auto mt-4')
+    
+    def create_auth_section(self):
+        """Create authentication section with login and register forms."""
+        # Login Card
+        self.login_card = ui.card().classes('w-full max-w-md mx-auto p-6 shadow-lg')
+        
+        with self.login_card:
+            ui.label('Login').classes('text-2xl font-bold text-center mb-6')
+            
+            self.login_username = ui.input('Username or Email').classes('w-full mb-4')
+            self.login_password = ui.input('Password', password=True).classes('w-full mb-4')
+            
+            with ui.row().classes('w-full gap-4'):
+                ui.button('Login', on_click=self.handle_login).classes(
+                    'flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded'
+                )
+                ui.button('Register', on_click=self.show_register_form).classes(
+                    'flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded'
+                )
+        
+        # Register Card (initially hidden)
+        self.register_card = ui.card().classes('w-full max-w-md mx-auto p-6 shadow-lg mt-6 hidden')
+        
+        with self.register_card:
+            ui.label('Register New Account').classes('text-2xl font-bold text-center mb-6')
+            
+            self.register_username = ui.input('Username').classes('w-full mb-3')
+            self.register_email = ui.input('Email').classes('w-full mb-3')
+            self.register_first_name = ui.input('First Name (Optional)').classes('w-full mb-3')
+            self.register_last_name = ui.input('Last Name (Optional)').classes('w-full mb-3')
+            self.register_password = ui.input('Password', password=True).classes('w-full mb-4')
+            
+            with ui.row().classes('w-full gap-4'):
+                ui.button('Create Account', on_click=self.handle_register).classes(
+                    'flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 rounded'
+                )
+                ui.button('Back to Login', on_click=self.show_login_form).classes(
+                    'flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded'
+                )
+    
+    def create_user_info_section(self):
+        """Create user information and logout section."""
+        self.user_info_card = ui.card().classes('w-full max-w-4xl mx-auto p-4 shadow-lg mb-6 hidden')
+        
+        with self.user_info_card:
+            with ui.row().classes('w-full justify-between items-center'):
+                self.user_welcome_label = ui.label().classes('text-lg font-medium')
+                ui.button('Logout', on_click=self.handle_logout).classes(
+                    'bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded'
+                )
+    
+    def handle_login(self):
+        """Handle user login"""
+        username = self.login_username.value
+        password = self.login_password.value
+        
+        if not username or not password:
+            ui.notify('Please enter both username and password', type='warning')
+            return
+        
+        try:
+            # Authenticate user
+            success, message, user = auth_service.authenticate_user(username, password)
+            
+            if success and user:
+                # Create session
+                session_token = auth_service.create_session(user)
+                
+                if session_token:
+                    self.current_user = user
+                    self.session_token = session_token
+                    self.is_authenticated = True
+                    
+                    # Update UI
+                    self.show_main_application()
+                    ui.notify(f'Welcome, {user.first_name or user.username}!', type='positive')
+                    
+                    # Load user's existing data
+                    self.load_user_data()
+                else:
+                    ui.notify('Failed to create session. Please try again.', type='negative')
+            else:
+                ui.notify(message, type='negative')
+                
+        except Exception as e:
+            logger.error(f"Login error: {str(e)}")
+            ui.notify('Login failed. Please try again.', type='negative')
+    
+    def handle_register(self):
+        """Handle user registration"""
+        username = self.register_username.value
+        email = self.register_email.value
+        password = self.register_password.value
+        first_name = self.register_first_name.value
+        last_name = self.register_last_name.value
+        
+        if not username or not email or not password:
+            ui.notify('Please fill in required fields (username, email, password)', type='warning')
+            return
+        
+        try:
+            # Register user
+            success, message, user = auth_service.register_user(
+                username=username,
+                email=email,
+                password=password,
+                first_name=first_name,
+                last_name=last_name
+            )
+            
+            if success:
+                ui.notify('Account created successfully! Please login.', type='positive')
+                self.show_login_form()
+                # Clear registration form
+                self.register_username.value = ''
+                self.register_email.value = ''
+                self.register_password.value = ''
+                self.register_first_name.value = ''
+                self.register_last_name.value = ''
+            else:
+                ui.notify(message, type='negative')
+                
+        except Exception as e:
+            logger.error(f"Registration error: {str(e)}")
+            ui.notify('Registration failed. Please try again.', type='negative')
+    
+    def handle_logout(self):
+        """Handle user logout"""
+        try:
+            if self.session_token:
+                auth_service.logout_session(self.session_token)
+            
+            # Clear state
+            self.current_user = None
+            self.session_token = None
+            self.is_authenticated = False
+            
+            # Clear data
+            self.processor.clear_all_files()
+            self.master_manager.clear_master_data()
+            
+            # Show login form
+            self.show_login_form()
+            ui.notify('Logged out successfully', type='info')
+            
+        except Exception as e:
+            logger.error(f"Logout error: {str(e)}")
+            ui.notify('Logout completed', type='info')
+    
+    def show_register_form(self):
+        """Show registration form and hide login form"""
+        self.login_card.classes(add='hidden')
+        self.register_card.classes(remove='hidden')
+    
+    def show_login_form(self):
+        """Show login form and hide registration form"""
+        self.register_card.classes(add='hidden')
+        self.login_card.classes(remove='hidden')
+    
+    def show_main_application(self):
+        """Show main application and hide auth forms"""
+        self.login_card.classes(add='hidden')
+        self.register_card.classes(add='hidden')
+        self.user_info_card.classes(remove='hidden')
+        self.main_content.classes(remove='hidden')
+        
+        # Update user welcome message
+        if self.current_user:
+            welcome_text = f"Welcome, {self.current_user.first_name or self.current_user.username}!"
+            self.user_welcome_label.set_text(welcome_text)
+    
+    def load_user_data(self):
+        """Load user's existing data from database"""
+        if not self.current_user:
+            return
+        
+        try:
+            # Get user's data from database
+            dl_df, vc_df = db_service.get_user_data(self.current_user.id)
+            
+            if not dl_df.empty or not vc_df.empty:
+                # Convert back to the format expected by DCMasterFileManager
+                if not dl_df.empty:
+                    self.master_manager.dl_data = dl_df
+                if not vc_df.empty:
+                    self.master_manager.vc_data = vc_df
+                
+                # Update results display
+                self.update_results_display()
+                
+                total_records = len(dl_df) + len(vc_df)
+                ui.notify(f'Loaded {total_records} existing records from database', type='info')
+                
+        except Exception as e:
+            logger.error(f"Error loading user data: {str(e)}")
+            ui.notify('Failed to load existing data', type='warning')
     
     def create_upload_section(self):
         """Create the file upload section with drag-and-drop functionality for multiple files."""
@@ -410,6 +635,21 @@ class DirectCostMasterApp:
                     if processed_records:
                         # Add processed data to master file
                         self.master_manager.add_project_data(processed_records)
+                        
+                        # Save to database if user is authenticated
+                        if self.is_authenticated and self.current_user:
+                            db_success, db_message, db_dl_count, db_vc_count = db_service.save_processed_data(
+                                processed_records, 
+                                self.current_user.id, 
+                                filename, 
+                                selected_period
+                            )
+                            
+                            if db_success:
+                                logger.info(f"Data saved to database: {db_message}")
+                            else:
+                                logger.error(f"Database save failed: {db_message}")
+                        
                         total_processed_records += len(processed_records)
                         successful_files += 1
                         logger.info(f"Successfully processed {len(processed_records)} records from {filename}")
@@ -568,18 +808,33 @@ class DirectCostMasterApp:
         # Create main container
         with ui.column().classes('w-full items-center space-y-6'):
             self.create_header()
-            self.create_upload_section()
-            self.create_file_info_section()
-            self.create_files_list_section()
-            self.create_process_section()
-            self.create_results_section()
-    
-    def run(self, host: str = '127.0.0.1', port: int = 8080):
-        """Run the application."""
-        self.create_ui()
-        
-        logger.info(f"Starting Direct Cost Master application on {host}:{port}")
-        ui.run(host=host, port=port, title='Direct Cost Master', favicon='📊')
+            
+            # Authentication section
+            self.create_auth_section()
+            self.create_user_info_section()
+            
+            # Main application content (initially hidden)
+            self.main_content = ui.column().classes('w-full items-center space-y-6 hidden')
+            
+            with self.main_content:
+                self.create_upload_section()
+                self.create_file_info_section()
+                self.create_files_list_section()
+                self.create_process_section()
+                self.create_results_section()
 
+host = '127.0.0.1'
+port = 8080
 app = DirectCostMasterApp()
-app.run()  # Start the application
+try:
+    db_config.create_tables()
+    logger.info("Database initialized successfully")
+except Exception as e:
+    logger.error(f"Database initialization failed: {str(e)}")
+    print("⚠️  Database connection failed. Please check your PostgreSQL setup.")
+    print("   Run 'python init_db.py' to initialize the database.")
+
+app.create_ui()
+
+logger.info(f"Starting Direct Cost Master application on {host}:{port}")
+ui.run(host=host, port=port, title='Direct Cost Master', favicon='📊')

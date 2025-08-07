@@ -1,10 +1,13 @@
 # Direct Cost Master Application
 
-A modern web-based application for processing P&L Excel files and consolidating Direct Cost data using NiceGUI.
+A modern web-based application for processing P&L Excel files and consolidating Direct Cost data using NiceGUI with PostgreSQL database integration and user authentication.
 
 ## Features
 
 - **Modern Web Interface**: Clean, minimalist design with responsive layout
+- **User Authentication**: Secure login/register system with session management
+- **PostgreSQL Database**: Persistent storage for processed data and user management
+- **Multiple File Processing**: Upload and process up to 20 Excel files simultaneously
 - **In-Memory File Processing**: Uses IOBytes approach - no temporary files on disk
 - **Excel File Support**: Handles .xlsx and .xls files with multiple sheets
 - **Smart Column Mapping**: Automatically handles Unnamed columns from merged Excel cells
@@ -12,28 +15,109 @@ A modern web-based application for processing P&L Excel files and consolidating 
 - **Automated Data Processing**: Implements business rules for DL and VC costs
 - **Master File Generation**: Consolidates data from multiple projects
 - **Real-time Preview**: View data before processing
+- **Data Persistence**: All processed data is saved to PostgreSQL database
 - **Download Results**: Export consolidated data as Excel file
+
+## Prerequisites
+
+- Python 3.8 or higher
+- PostgreSQL 12 or higher
+- Git (for cloning the repository)
 
 ## Installation
 
-1. Install required packages:
+1. **Clone the repository**:
+```bash
+git clone <repository-url>
+cd DirectCostMaster
+```
+
+2. **Create virtual environment**:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. **Install required packages**:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Run the application:
+4. **Set up PostgreSQL database**:
+```bash
+# Create database
+createdb directcostmaster
+
+# Or using psql:
+psql -U postgres
+CREATE DATABASE directcostmaster;
+\q
+```
+
+5. **Configure environment variables**:
+```bash
+# Copy example environment file
+cp .env.example .env
+
+# Edit .env file with your database credentials
+DATABASE_URL=postgresql://username:password@localhost:5432/directcostmaster
+```
+
+6. **Initialize database**:
+```bash
+python init_db.py
+```
+
+7. **Run the application**:
 ```bash
 python main.py
 ```
 
-3. Open your browser and navigate to `http://127.0.0.1:8080`
+8. **Open your browser** and navigate to `http://127.0.0.1:8080`
+
+## Default Login
+
+After running `init_db.py`, you can log in with:
+- **Username**: admin
+- **Password**: admin123
+
+⚠️ **Important**: Change the default password after first login!
 
 ## How to Use
 
-1. **Upload P&L File**: Drag and drop or click to upload your Excel P&L file
-2. **Preview Data**: Select and preview different sheets from your file
-3. **Process Data**: Click "Process P&L File" to extract and classify Direct Costs
-4. **Download Results**: Use "Download Master DC File" to get the consolidated data
+### Authentication
+1. **Register**: Create a new account or use the default admin account
+2. **Login**: Enter your credentials to access the application
+
+### File Processing
+1. **Upload Files**: Drag and drop or click to upload up to 20 Excel P&L files
+2. **Review Files**: View the list of uploaded files and their status
+3. **Select Period**: Choose the month and year to process
+4. **Process Data**: Click "Process All P&L Files" to extract and classify Direct Costs
+5. **View Results**: Browse DL and VC costs in separate tabs
+6. **Download Results**: Export consolidated data as Excel file
+
+### Data Management
+- All processed data is automatically saved to the database
+- Data persists between sessions
+- Users can only see their own data
+- Clear data using "Clear All Data" button when needed
+
+## Database Schema
+
+### Core Tables
+- **users**: User accounts and authentication
+- **user_sessions**: Session management
+- **projects**: Project information extracted from filenames
+- **dl_cost_records**: Direct Labor cost records
+- **vc_cost_records**: Variable cost records
+- **processing_logs**: Processing history and error logs
+
+### Key Features
+- User isolation (users only see their own data)
+- Session-based authentication
+- Audit trail for all processing operations
+- Automatic project creation from filenames
 
 ## Business Logic
 
@@ -42,82 +126,169 @@ The application processes two types of data according to the requirements:
 ### DL Costs (Direct) Processing
 - Extracts employee data and hours
 - Classifies records into buckets:
+  - **Need clarification**: Base salary + payroll taxes + vacation + paid vacation
+  - **Sick leave**: When sick leave is > 0
+  - **Medical Insurance**: When medical insurance > 0
+  - **Bonus**: When unconditional bonus > 0
+  - **Paid overtime**: When paid overtime > 0 (includes base salary components)
   - **PM role charge**: For PM role charge entries
-  - **Sick leave**: When sick leave hours match total direct hours
-  - **Bonus**: When unconditional bonus matches total DL amount
-  - **Regular DL**: For standard employee records
+  - **Discrepancies & corrections**: When total hours < 0
 
 ### VC Costs (Direct) Processing
 - Extracts variable cost data
 - Classifies records into buckets:
-  - **Recruiting costs**: For items starting with "Recruiting costs"
-  - **DC-other DC**: For all other variable costs
+  - **Recruiting cost**: For recruiting costs
+  - **DC - other DC**: Combined other direct costs
+  - **Discrepancies & corrections**: When any value < 0
+
+## Configuration
+
+### Environment Variables (.env)
+```bash
+# Database Configuration
+DATABASE_URL=postgresql://username:password@host:port/database
+
+# Application Configuration
+SECRET_KEY=your-secret-key-change-this-in-production
+DEBUG=True
+
+# Session Configuration
+SESSION_DURATION_HOURS=24
+
+# Logging Configuration
+LOG_LEVEL=INFO
+```
+
+### Database Configuration
+- Connection pooling with 10 connections + 20 overflow
+- Automatic table creation on startup
+- Migration-ready schema design
 
 ## File Structure
 
 ```
 DirectCostMaster/
-├── main.py                 # Main application with NiceGUI interface
-├── dc_processor.py         # Business logic for data processing
-├── requirements.txt        # Python dependencies
+├── main.py                    # Main application with NiceGUI interface
+├── dc_processor.py            # Business logic for data processing
+├── models.py                  # SQLAlchemy database models
+├── auth.py                   # Authentication and session management
+├── database_service.py       # Database operations service
+├── init_db.py               # Database initialization script
+├── requirements.txt         # Python dependencies
+├── .env.example            # Environment variables template
+├── .env                    # Environment variables (create from example)
 ├── process_description.txt # Original business requirements
 └── README.md              # This file
 ```
 
-## Technical Details
+## Security Features
 
-- **Framework**: NiceGUI for web interface
-- **Data Processing**: pandas for Excel manipulation
-- **Excel Support**: openpyxl engine for .xlsx files
-- **Memory Management**: IOBytes approach for file handling
-- **Column Mapping**: Position-based mapping for handling Unnamed Excel columns
-- **Month Processing**: Automatic detection of monthly data sections
-- **Logging**: Comprehensive logging for debugging
+- **Password Hashing**: bcrypt for secure password storage
+- **Session Management**: Secure session tokens with expiration
+- **User Isolation**: Users can only access their own data
+- **SQL Injection Protection**: SQLAlchemy ORM prevents SQL injection
+- **Environment Variables**: Sensitive data stored in environment variables
 
-## Excel File Requirements
+## API Services
 
-The application expects Excel files with the following structure:
+### AuthService
+- User registration and authentication
+- Session creation and validation
+- Password hashing and verification
+- Session cleanup and logout
 
-### DL Costs (Direct) Sheet
-- Monthly sections with data organized by month (e.g., "February 2025", "March 2025")
-- Employee/Ticket names in the first column
-- Standard columns for hours, costs, and other metrics
-- Handles merged cells and unnamed columns automatically
+### DatabaseService
+- Project management
+- Data persistence and retrieval
+- Processing history tracking
+- Excel export functionality
 
-### Supported Column Types
-- TOTAL Hours direct
-- Hours direct  
-- Hours sick leave paid by project
-- Man-months direct
-- TOTAL DL costs
-- Base salary
-- Sick leave Paid by Project
-- Paid overtime
-- Unconditional Bonus
-- Payroll taxes
-- Accrued Vacation Liability
-- Paid vacation
-- VC.Medical Insurance
+## Error Handling
+
+Comprehensive error handling and user feedback:
+- Database connection errors
+- Authentication failures
+- File format validation
+- Processing error notifications
+- Session timeout handling
+
+## Performance Considerations
+
+- **Connection Pooling**: Efficient database connection management
+- **In-Memory Processing**: Fast file processing without disk I/O
+- **Batch Operations**: Efficient database bulk inserts
+- **Session Cleanup**: Automatic cleanup of expired sessions
+
+## Development
+
+### Adding New Features
+1. Database changes: Update `models.py` and run migrations
+2. Business logic: Modify `dc_processor.py`
+3. UI changes: Update `main.py`
+4. Database operations: Extend `database_service.py`
+
+### Testing
+1. Use test database for development
+2. Test with sample P&L files
+3. Verify authentication flows
+4. Check multi-user scenarios
+
+## Troubleshooting
+
+### Database Connection Issues
+```bash
+# Check PostgreSQL is running
+pg_ctl status
+
+# Test connection
+psql -U username -d directcostmaster
+
+# Check logs
+tail -f /var/log/postgresql/postgresql.log
+```
+
+### Authentication Issues
+- Verify user exists in database
+- Check session expiration
+- Clear browser cookies
+- Check server logs
+
+### File Processing Issues
+- Verify Excel file format
+- Check column structure
+- Review processing logs
+- Test with smaller files first
 
 ## Browser Compatibility
 
 The application works with all modern browsers including Chrome, Firefox, Safari, and Edge.
 
-## Error Handling
+## Production Deployment
 
-The application includes comprehensive error handling and user feedback:
-- File format validation
-- Missing sheet detection
-- Data validation warnings
-- Processing error notifications
+### Environment Setup
+1. Use production PostgreSQL instance
+2. Set strong SECRET_KEY
+3. Disable DEBUG mode
+4. Configure proper logging
+5. Use HTTPS in production
+6. Set up database backups
 
-## Development
-
-To extend the application:
-1. Modify `dc_processor.py` for new business rules
-2. Update `main.py` for UI changes
-3. Test with sample P&L files
+### Security Checklist
+- [ ] Change default admin password
+- [ ] Use strong SECRET_KEY
+- [ ] Enable HTTPS
+- [ ] Configure firewall
+- [ ] Set up database backups
+- [ ] Monitor logs for suspicious activity
 
 ## Support
 
-For issues or questions, check the application logs or review the process description file for business requirements.
+For issues or questions:
+1. Check application logs
+2. Review database connection
+3. Verify file format requirements
+4. Check the process description file for business requirements
+
+## License
+
+[Add your license information here]
