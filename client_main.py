@@ -364,6 +364,12 @@ class DirectCostMasterClient:
                 ],
                 rows=[]
             ).classes('w-full')
+
+            # Program reconcile button
+            with ui.row().classes('w-full justify-end mt-4'):
+                ui.button('Propose Program Reconcile', on_click=self.handle_propose_program_reconcile).classes(
+                    'bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded'
+                )
     
     def create_process_section(self):
         """Create the data processing controls section."""
@@ -747,6 +753,127 @@ class DirectCostMasterClient:
             
             logger.error(f"Error updating results: {str(e)}")
             ui.notify(f'Error updating results: {str(e)}', type='negative')
+
+    async def handle_propose_program_reconcile(self):
+        """Initiate propose reconcile flow for a single program file (UI side)."""
+        if not self.is_authenticated:
+            ui.notify('Please login first', type='warning')
+            return
+
+        # Must have at least one file uploaded
+        if not self.uploaded_files:
+            ui.notify('Please upload at least one P&L file to propose reconciliation', type='warning')
+            return
+        
+        content = ui.column().classes('p-4')
+        with ui.dialog().classes('w-2/3') as dialog, content:
+            ui.label('Program P&L Reconciliation').classes('text-lg font-bold mb-4')
+            
+            # Create dropdown for file selection
+            file_options = {f.get('file_id'): f.get('filename', 'Unknown') for f in self.uploaded_files}
+            selected_file = ui.select(
+                options=file_options,
+                label='Select Program P&L file',
+                value=None  # Let user explicitly select a file
+            ).classes('w-full mb-4')
+            
+            async def propose_reconcile():
+                if not selected_file.value:
+                    ui.notify('Please select a file', type='warning')
+                    return
+                
+                # Extract just the file_id from the selected option
+                if isinstance(selected_file.value, dict):
+                    file_id = selected_file.value.get('value')
+                else:
+                    file_id = selected_file.value
+
+                if not file_id:
+                    ui.notify('Please select a valid file', type='warning')
+                    return
+
+                selected_month = self.month_select.value
+                selected_year = self.year_select.value
+                
+                ui.notify('Requesting reconciliation proposal from server...', type='info')
+                
+                success, result = api_client.propose_reconcile_program(file_id, selected_month, selected_year)
+                
+                if not success:
+                    error = result.get('error', 'Unknown error') if isinstance(result, dict) else str(result)
+                    ui.notify(f'Failed to get proposal: {error}', type='negative')
+                    return
+                
+                # Update dialog with proposal results
+                program_name = result.get('program_name')
+                period = result.get('period')
+                proposed = result.get('proposed_additions', [])
+                total_amount = result.get('total_proposed_amount', 0)
+                
+                # Clear previous content if any
+                content.clear()
+                
+                with content:
+                    ui.label(f'Reconciliation proposal for {program_name}').classes('text-lg font-bold')
+                    ui.label(f'Period: {period}').classes('text-md text-gray-600')
+                    ui.label(f'Proposed additions: {len(proposed)} | Total amount: {total_amount}').classes('text-sm text-gray-600 mb-4')
+                    
+                    # Show table of proposed additions
+                    rows = []
+                    for p in proposed:
+                        rows.append({
+                            'type': p.get('type'),
+                            'employee': p.get('employee') or p.get('item'),
+                            'bucket': p.get('bucket'),
+                            'amount': p.get('total_dl_costs')
+                        })
+                    
+                    if rows:
+                        ui.table(
+                            columns=[
+                                {'name': 'type', 'label': 'Type', 'field': 'type'},
+                                {'name': 'employee', 'label': 'Employee/Item', 'field': 'employee'},
+                                {'name': 'bucket', 'label': 'Bucket', 'field': 'bucket'},
+                                {'name': 'amount', 'label': 'Amount', 'field': 'amount'}
+                            ],
+                            rows=rows
+                        ).classes('w-full mb-4')
+                    else:
+                        ui.label('No additions proposed - all costs accounted for').classes('text-sm text-gray-600 italic mb-4')
+                    
+                    with ui.row().classes('w-full justify-end gap-4'):
+                        ui.button('Cancel', on_click=lambda: dialog.close()).classes(
+                            'bg-gray-400 hover:bg-gray-500 text-white py-2 px-4 rounded'
+                        )
+                        
+                        if rows:  # Only show Apply if there are additions
+                            async def apply_and_close():
+                                # Call apply endpoint with proposed additions
+                                apply_success, apply_result = api_client.apply_reconcile_program(file_id, selected_month, selected_year, proposed)
+                                if not apply_success:
+                                    err = apply_result.get('error', 'Unknown error') if isinstance(apply_result, dict) else str(apply_result)
+                                    ui.notify(f'Failed to apply additions: {err}', type='negative')
+                                else:
+                                    message = apply_result.get('message', 'Applied')
+                                    ui.notify(f'Apply result: {message}', type='positive')
+                                    # Refresh results display
+                                    await self.update_results_display()
+                                dialog.close()
+                            
+                            ui.button('Apply Additions', on_click=apply_and_close).classes(
+                                'bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded'
+                            )
+            
+            # Initial dialog buttons
+            with ui.row().classes('w-full justify-end gap-4 mt-4'):
+                ui.button('Cancel', on_click=lambda: dialog.close()).classes(
+                    'bg-gray-400 hover:bg-gray-500 text-white py-2 px-4 rounded'
+                )
+                ui.button('Propose Reconciliation', on_click=propose_reconcile).classes(
+                    'bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded'
+                )
+
+        dialog.open()
     
     async def refresh_results(self):
         """Manually refresh results display"""

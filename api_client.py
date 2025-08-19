@@ -422,6 +422,45 @@ class APIClientService:
             return response.status_code == 200
         except:
             return False
+
+    # Reconciliation client methods
+    def propose_reconcile_program(self, file_id: str, month: str, year: str) -> Tuple[bool, Dict[str, Any]]:
+        """Request a reconciliation proposal for a program-level P&L file."""
+        try:
+            if not self.auth_token:
+                return False, {"error": "Authentication required"}
+
+            data = {'file_id': file_id, 'month': month, 'year': year}
+            response = self.session.post(
+                f"{self.base_url}/api/v1/reconcile/program/propose",
+                json=data,
+                headers=self._get_headers()
+            )
+
+            result = self._handle_response(response)
+            return True, result
+        except Exception as e:
+            logger.error(f"Propose reconcile error: {str(e)}")
+            return False, {"error": str(e)}
+
+    def apply_reconcile_program(self, file_id: str, month: str, year: str, additions: List[Dict[str, Any]]) -> Tuple[bool, Dict[str, Any]]:
+        """Apply reconciliation additions approved by the user."""
+        try:
+            if not self.auth_token:
+                return False, {"error": "Authentication required"}
+
+            data = {'file_id': file_id, 'month': month, 'year': year, 'additions': additions}
+            response = self.session.post(
+                f"{self.base_url}/api/v1/reconcile/program/apply",
+                json=data,
+                headers=self._get_headers()
+            )
+
+            result = self._handle_response(response)
+            return True, result
+        except Exception as e:
+            logger.error(f"Apply reconcile error: {str(e)}")
+            return False, {"error": str(e)}
     
     def is_authenticated(self) -> bool:
         """Check if user is authenticated"""

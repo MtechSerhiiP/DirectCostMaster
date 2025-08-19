@@ -23,7 +23,7 @@ class DatabaseService:
     def __init__(self):
         pass
     
-    def create_or_get_project(self, project_name: str, user_id: int, description: str = None) -> Optional[Project]:
+    def create_or_get_project(self, project_name: str, user_id: int, description: str = None, db_session: Session = None) -> Optional[Project]:
         """
         Create a new project or get existing one
         
@@ -35,7 +35,10 @@ class DatabaseService:
         Returns:
             Project object or None if failed
         """
-        db_session = db_config.get_session()
+        # NOTE: accept an external session in future to avoid detached instances
+        external_session = db_session is not None
+        if not external_session:
+            db_session = db_config.get_session()
         try:
             # Check if project already exists
             existing_project = db_session.query(Project).filter(
@@ -44,29 +47,30 @@ class DatabaseService:
                     Project.is_active == True
                 )
             ).first()
-            
+
             if existing_project:
                 return existing_project
-            
+
             # Create new project
             new_project = Project(
                 name=project_name,
                 description=description,
                 created_by=user_id
             )
-            
+
             db_session.add(new_project)
             db_session.commit()
-            
+
             logger.info(f"Created new project: {project_name}")
             return new_project
-            
+
         except Exception as e:
             db_session.rollback()
             logger.error(f"Error creating project: {str(e)}")
             return None
         finally:
-            db_session.close()
+            if not external_session:
+                db_session.close()
     
     def save_processed_data(self, processed_records: List[Dict], user_id: int, 
                            filename: str, period: str) -> Tuple[bool, str, int, int]:
@@ -86,7 +90,7 @@ class DatabaseService:
         start_time = datetime.utcnow()
         dl_count = 0
         vc_count = 0
-        
+
         try:
             # Group records by project
             projects_data = {}
@@ -94,20 +98,20 @@ class DatabaseService:
                 project_name = record.get('Project', 'Unknown')
                 if project_name not in projects_data:
                     projects_data[project_name] = {'dl': [], 'vc': []}
-                
+
                 # Determine record type based on presence of 'Employee' vs 'Item'
                 if 'Employee' in record:
                     projects_data[project_name]['dl'].append(record)
                 elif 'Item' in record:
                     projects_data[project_name]['vc'].append(record)
-            
+
             # Process each project
             for project_name, data in projects_data.items():
-                # Create or get project
-                project = self.create_or_get_project(project_name, user_id)
+                # Create or get project using same session to keep instance bound
+                project = self.create_or_get_project(project_name, user_id, db_session=db_session)
                 if not project:
                     continue
-                
+
                 # Save DL records
                 for dl_record in data['dl']:
                     db_dl_record = DLCostRecord(
@@ -123,7 +127,7 @@ class DatabaseService:
                     )
                     db_session.add(db_dl_record)
                     dl_count += 1
-                
+
                 # Save VC records
                 for vc_record in data['vc']:
                     db_vc_record = VCCostRecord(
@@ -137,7 +141,7 @@ class DatabaseService:
                     )
                     db_session.add(db_vc_record)
                     vc_count += 1
-            
+
             # Create processing log
             processing_time = (datetime.utcnow() - start_time).total_seconds()
             log_entry = ProcessingLog(
@@ -149,16 +153,16 @@ class DatabaseService:
                 processing_time_seconds=processing_time
             )
             db_session.add(log_entry)
-            
+
             db_session.commit()
-            
+
             message = f"Successfully saved {dl_count} DL records and {vc_count} VC records for {len(projects_data)} projects"
             logger.info(f"Data saved to database: {message}")
             return True, message, dl_count, vc_count
-            
+
         except Exception as e:
             db_session.rollback()
-            
+
             # Log the error
             processing_time = (datetime.utcnow() - start_time).total_seconds()
             try:
@@ -175,9 +179,10 @@ class DatabaseService:
                 db_session.commit()
             except:
                 pass
-            
+
             logger.error(f"Error saving data to database: {str(e)}")
             return False, f"Failed to save data: {str(e)}", 0, 0
+
         finally:
             db_session.close()
     

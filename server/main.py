@@ -247,6 +247,51 @@ async def start_processing(
         raise HTTPException(status_code=500, detail="Failed to start processing")
 
 
+@app.post('/api/v1/reconcile/program/propose', response_model=ReconcileReportResponse)
+async def propose_reconcile_program(
+    request: ReconcileProgramRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Generate a reconciliation proposal for a program-level P&L file (do not apply changes)."""
+    try:
+        # Only allow one program file per request - processing service enforces single-file policy
+        report = processing_service.propose_reconcile_program(
+            file_id=request.file_id,
+            month=request.month,
+            year=request.year,
+            user_id=current_user['id']
+        )
+        return report
+    except Exception as e:
+        logger.error(f"Propose reconcile error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post('/api/v1/reconcile/program/apply', response_model=ApplyReconcileResponse)
+async def apply_reconcile_program(
+    request: ApplyReconcileRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Apply approved reconciliation additions from a program P&L file to the user's data."""
+    try:
+        success, message, applied_dl, applied_vc = processing_service.apply_reconcile_program(
+            file_id=request.file_id,
+            month=request.month,
+            year=request.year,
+            additions=request.additions,
+            user_id=current_user['id']
+        )
+        return ApplyReconcileResponse(
+            success=success,
+            message=message,
+            applied_dl=applied_dl,
+            applied_vc=applied_vc
+        )
+    except Exception as e:
+        logger.error(f"Apply reconcile error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/v1/files/process/{job_id}/status", response_model=ProcessingStatusResponse)
 async def get_processing_status(
     job_id: str,

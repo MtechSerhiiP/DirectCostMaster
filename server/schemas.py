@@ -173,6 +173,46 @@ class ClearDataResponse(BaseModel):
     message: str
 
 
+# Reconciliation schemas
+class ProposedAddition(BaseModel):
+    project: str
+    type: str  # 'DL' or 'VC'
+    employee: Optional[str] = None
+    item: Optional[str] = None
+    bucket: str
+    dc_hours: Optional[float] = None
+    total_dl_costs: float
+    source_file: Optional[str] = None
+
+
+class ReconcileProgramRequest(BaseModel):
+    file_id: str
+    month: str
+    year: str
+
+
+class ReconcileReportResponse(BaseModel):
+    program_name: str
+    period: str
+    proposed_additions: List[ProposedAddition]
+    total_proposed_amount: float
+    proposed_count: int
+
+
+class ApplyReconcileRequest(BaseModel):
+    file_id: str
+    month: str
+    year: str
+    additions: List[ProposedAddition]
+
+
+class ApplyReconcileResponse(BaseModel):
+    success: bool
+    message: str
+    applied_dl: int
+    applied_vc: int
+
+
 class ProjectInfo(BaseModel):
     id: int
     name: str

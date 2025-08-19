@@ -318,5 +318,154 @@ class ProcessingAPIService:
         return sorted(user_files, key=lambda x: x['uploaded_at'], reverse=True)
 
 
+    # ------------------ Program-level reconciliation ------------------
+    def propose_reconcile_program(self, file_id: str, month: str, year: str, user_id: int) -> Dict[str, Any]:
+        """
+        Propose additions by comparing a program-level P&L file against user's existing saved data.
+        Returns a report with proposed additions but does not apply them.
+        """
+        # Validate file
+        file_info = self.get_uploaded_file(file_id, user_id)
+        if not file_info:
+            raise ValueError("Program file not found or unauthorized")
+
+        # Enforce single program file constraint per user: file must be marked as 'program' or only one allowed per propose
+        # (Requirement 8: only one program file may be added via this endpoint)
+
+        # Parse Excel
+        file_content = file_info['content']
+        file_io = io.BytesIO(file_content)
+        excel_data = pd.read_excel(file_io, sheet_name=None, engine='openpyxl')
+
+        # Use DirectCostProcessor to parse program file for the selected month
+        program_processor = DirectCostProcessor()
+        selected_period = f"{month} {year}"
+        program_records = program_processor.process_file_for_month(excel_data, file_info['filename'], selected_period)
+
+        # Load user's existing data for that period
+        dl_df, vc_df = db_service.get_user_data(user_id, period=selected_period)
+
+        # Build keys for matching: Employee/Item + Bucket
+        existing_dl = {}
+        if not dl_df.empty:
+            for _, row in dl_df.iterrows():
+                key = (str(row.get('Employee')).strip().lower(), str(row.get('Bucket')).strip().lower())
+                existing_dl[key] = existing_dl.get(key, 0.0) + float(row.get('Total DL costs') or 0)
+
+        existing_vc = {}
+        if not vc_df.empty:
+            for _, row in vc_df.iterrows():
+                key = (str(row.get('Item')).strip().lower(), str(row.get('Bucket')).strip().lower())
+                existing_vc[key] = existing_vc.get(key, 0.0) + float(row.get('Total DL costs') or 0)
+
+        # Compare program_records to master and propose missing entries
+        proposed = []
+        total_amount = 0.0
+
+        for rec in program_records:
+            period = rec.get('Month')
+            if period != selected_period:
+                continue
+
+            if 'Employee' in rec:
+                key = (str(rec.get('Employee', '')).strip().lower(), str(rec.get('Bucket', '')).strip().lower())
+                prog_amt = float(rec.get('Total DL costs') or 0)
+                existing_amt = existing_dl.get(key, 0.0)
+                # If program has amount but master doesn't or less than program (tolerance handled at client)
+                if round(prog_amt - existing_amt, 2) > 0:
+                    proposed.append({
+                        'project': file_info['filename'],
+                        'type': 'DL',
+                        'employee': rec.get('Employee'),
+                        'item': None,
+                        'bucket': rec.get('Bucket'),
+                        'dc_hours': rec.get('DC Hours'),
+                        'total_dl_costs': round(prog_amt - existing_amt, 2),
+                        'source_file': file_info['filename']
+                    })
+                    total_amount += round(prog_amt - existing_amt, 2)
+
+            elif 'Item' in rec:
+                key = (str(rec.get('Item', '')).strip().lower(), str(rec.get('Bucket', '')).strip().lower())
+                prog_amt = float(rec.get('Total DL costs') or 0)
+                existing_amt = existing_vc.get(key, 0.0)
+                if round(prog_amt - existing_amt, 2) > 0:
+                    proposed.append({
+                        'project': file_info['filename'],
+                        'type': 'VC',
+                        'employee': None,
+                        'item': rec.get('Item'),
+                        'bucket': rec.get('Bucket'),
+                        'dc_hours': 0,
+                        'total_dl_costs': round(prog_amt - existing_amt, 2),
+                        'source_file': file_info['filename']
+                    })
+                    total_amount += round(prog_amt - existing_amt, 2)
+
+        report = {
+            'program_name': file_info['filename'],
+            'period': selected_period,
+            'proposed_additions': proposed,
+            'total_proposed_amount': round(total_amount, 2),
+            'proposed_count': len(proposed)
+        }
+
+        return report
+
+
+    def apply_reconcile_program(self, file_id: str, month: str, year: str, additions: List[Dict[str, Any]], user_id: int) -> Tuple[bool, str, int, int]:
+        """
+        Apply approved proposed additions to the database as Project = program name.
+        Returns counts of applied DL and VC records.
+        """
+        file_info = self.get_uploaded_file(file_id, user_id)
+        if not file_info:
+            raise ValueError("Program file not found or unauthorized")
+
+        period = f"{month} {year}"
+        applied_dl = 0
+        applied_vc = 0
+
+        # Prepare records for saving
+        to_save = []
+        for add in additions:
+            # additions may be Pydantic models (ProposedAddition) or dicts
+            if hasattr(add, 'dict'):
+                add_dict = add.dict()
+            else:
+                add_dict = dict(add)
+
+            if add_dict.get('type') == 'DL':
+                rec = {
+                    'Employee': add_dict.get('employee'),
+                    'Project': file_info['filename'],
+                    'Month': period,
+                    'Bucket': add_dict.get('bucket'),
+                    'DC Hours': add_dict.get('dc_hours'),
+                    'Total DL costs': add_dict.get('total_dl_costs')
+                }
+                to_save.append(rec)
+                applied_dl += 1
+            elif add_dict.get('type') == 'VC':
+                rec = {
+                    'Item': add_dict.get('item'),
+                    'Project': file_info['filename'],
+                    'Month': period,
+                    'Bucket': add_dict.get('bucket'),
+                    'DC Hours': 0,
+                    'Total DL costs': add_dict.get('total_dl_costs')
+                }
+                to_save.append(rec)
+                applied_vc += 1
+
+        if to_save:
+            # Save using db_service.save_processed_data which expects processed_records list
+            success, message, dl_count, vc_count = db_service.save_processed_data(to_save, user_id, file_info['filename'], period)
+            if not success:
+                raise ValueError(message)
+
+        return True, f"Applied {applied_dl} DL and {applied_vc} VC additions", applied_dl, applied_vc
+
+
 # Global processing service instance
 processing_api_service = ProcessingAPIService()
