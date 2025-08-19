@@ -3,7 +3,7 @@
 ## Overview
 Direct Cost Master now uses a modern Client-Server architecture:
 - **Server**: FastAPI REST API (`/server/`) handling business logic and data processing
-- **Client**: NiceGUI web interface (`client_main.py`) for user interaction
+- **Client**: NiceGUI web interface (`client/main.py`) for user interaction
 
 ## Quick Start
 
@@ -40,7 +40,8 @@ Server runs on: http://127.0.0.1:8000
 start_client.bat
 
 # Option 2: Manual start
-python client_main.py
+cd client
+python main.py
 ```
 Client runs on: http://127.0.0.1:8080
 
@@ -61,7 +62,7 @@ API_PORT=8000
 ```
 
 ### Client Configuration  
-Copy `.env.client.example` to `.env` and update:
+Copy `client/.env.example` to `client/.env` and update:
 ```bash
 # API Server Connection
 API_HOST=127.0.0.1
@@ -99,13 +100,13 @@ When the server is running, visit:
 
 ### Adding New Features
 1. **Server**: Add endpoints in `server/main.py`, logic in services
-2. **Client**: Add UI components and API calls in `client_main.py`
+2. **Client**: Add UI components and API calls in `client/main.py`
 3. **Schemas**: Update `server/schemas.py` for new data models
 
 ### Testing
 1. Start server: `cd server && python main.py`
 2. Test API: Visit `http://127.0.0.1:8000/docs`
-3. Start client: `python client_main.py`
+3. Start client: `cd client && python main.py`
 4. Test complete workflow
 
 ## Troubleshooting
@@ -135,8 +136,10 @@ DirectCostMaster/
 │   ├── data_service.py       # Data operations
 │   ├── schemas.py            # API models
 │   └── requirements.txt      # Server dependencies
-├── client_main.py            # NiceGUI client
-├── api_client.py             # API communication layer
+├── client/                   # NiceGUI client
+│   ├── main.py              # Client application
+│   ├── api_client.py        # API communication layer
+│   └── requirements.txt     # Client dependencies
 ├── dc_processor.py           # Business logic (used by server)
 ├── database_service.py       # Database operations
 ├── models.py                 # SQLAlchemy models

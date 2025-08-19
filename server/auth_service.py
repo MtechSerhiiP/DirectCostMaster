@@ -11,24 +11,67 @@ from typing import Optional, Tuple, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 import logging
-
+from dotenv import load_dotenv
 # Import existing models (we'll use the same User model)
 from models import User, db_config
 
 logger = logging.getLogger(__name__)
 
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 class AuthAPIService:
     """JWT-based authentication service for the API"""
     
     def __init__(self):
-        # JWT configuration
-        self.secret_key = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')
+        # JWT configuration - SECURE: No fallback, require proper secret
+        self.secret_key = self._get_secure_jwt_secret()
         self.algorithm = 'HS256'
         self.token_expire_hours = int(os.getenv('JWT_EXPIRE_HOURS', '24'))
+    
+    def _get_secure_jwt_secret(self) -> str:
+        """
+        Securely retrieve and validate JWT secret key.
         
-        if self.secret_key == 'your-secret-key-change-in-production':
-            logger.warning("Using default JWT secret key. Change JWT_SECRET_KEY in production!")
+        Returns:
+            Valid JWT secret key
+            
+        Raises:
+            RuntimeError: If no secure secret is configured
+        """
+        secret = os.getenv('JWT_SECRET_KEY')
+
+        # CRITICAL SECURITY: Refuse to start without proper secret
+        if not secret:
+            raise RuntimeError(
+                "SECURITY ERROR: JWT_SECRET_KEY environment variable is required. "
+                "Set a cryptographically secure random key (minimum 32 characters)."
+            )
+        
+        # Validate secret strength
+        if len(secret) < 32:
+            raise RuntimeError(
+                "SECURITY ERROR: JWT_SECRET_KEY must be at least 32 characters long. "
+                "Generate a secure key using: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        
+        # Check for common weak defaults
+        weak_defaults = {
+            'your-secret-key-change-in-production',
+            'secret',
+            'jwt-secret',
+            'your-super-secret-jwt-key-change-in-production-make-it-long-and-random',
+            'change-me',
+            'development-key'
+        }
+        
+        if secret.lower() in weak_defaults or secret in weak_defaults:
+            raise RuntimeError(
+                "SECURITY ERROR: Detected weak/default JWT secret. "
+                "Generate a secure key using: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+            )
+        
+        logger.info("JWT secret key validated successfully")
+        return secret
     
     def register_user(self, username: str, email: str, password: str, 
                      first_name: str = None, last_name: str = None) -> Tuple[bool, str, Optional[User]]:
@@ -160,7 +203,7 @@ class AuthAPIService:
     
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         """
-        Verify and decode JWT token
+        Verify and decode JWT token with optimized database access
         
         Args:
             token: JWT token string
@@ -169,31 +212,42 @@ class AuthAPIService:
             Decoded token payload or None if invalid
         """
         try:
-            # Decode token
+            # Decode and validate token first (no DB access needed)
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             
-            # Check if user still exists and is active
+            # Extract user_id and validate it exists
             user_id = payload.get('user_id')
-            if user_id:
-                db_session = db_config.get_session()
-                try:
-                    user = db_session.query(User).filter(
-                        and_(User.id == user_id, User.is_active == True)
-                    ).first()
-                    
-                    if not user:
-                        logger.warning(f"Token verification failed: User {user_id} not found or inactive")
-                        return None
-                finally:
-                    db_session.close()
+            if not user_id:
+                logger.warning("Token verification failed: Missing user_id in payload")
+                return None
             
-            return {
-                'id': payload.get('user_id'),
-                'username': payload.get('username'),
-                'email': payload.get('email'),
-                'first_name': payload.get('first_name'),
-                'last_name': payload.get('last_name')
-            }
+            # Optimized: Only check user existence if token is valid and recent
+            # For frequently accessed tokens, consider implementing caching here
+            db_session = db_config.get_session()
+            try:
+                user = db_session.query(User).filter(
+                    and_(User.id == user_id, User.is_active == True)
+                ).first()
+                
+                if not user:
+                    logger.warning(f"Token verification failed: User {user_id} not found or inactive")
+                    return None
+                
+                # Return verified payload
+                return {
+                    'id': user_id,
+                    'username': payload.get('username'),
+                    'email': payload.get('email'),
+                    'first_name': payload.get('first_name'),
+                    'last_name': payload.get('last_name')
+                }
+                
+            except Exception as db_error:
+                logger.error(f"Database error during token verification: {str(db_error)}")
+                return None
+            finally:
+                # CRITICAL: Always close the session
+                db_session.close()
             
         except jwt.ExpiredSignatureError:
             logger.warning("Token verification failed: Token expired")
