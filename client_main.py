@@ -375,7 +375,7 @@ class DirectCostMasterClient:
             self.month_select = ui.select(
                 options=['January', 'February', 'March', 'April', 'May', 'June',
                         'July', 'August', 'September', 'October', 'November', 'December'],
-                value='June'
+                value='July'
             ).classes('w-full mb-4')
             
             # Year selection

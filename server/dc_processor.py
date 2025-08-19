@@ -400,8 +400,17 @@ class DirectCostProcessor:
                     })
                     processed_records.append(record)
 
+                # Rule 1: Recruiting cost
+                if travel_val > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'Travel',
+                        'Total DL costs': round(travel_val, 2)
+                    })
+                    processed_records.append(record)
+
                 # Rule 2: DC - other DC (combine all other direct costs)
-                other_dc_total = hw_nonresellable_val + sw_nonresellable_val + travel_val + communications_val + other_direct_val
+                other_dc_total = hw_nonresellable_val + sw_nonresellable_val + communications_val + other_direct_val
                 other_dc_total = round(other_dc_total, 2)  # Round to 2 decimal places
                 if other_dc_total > 0:
                     record = base_record_info.copy()
@@ -659,7 +668,7 @@ class DirectCostProcessor:
         
         start_row = None
         end_row = None
-
+        start_row_found = False
         # Search through the DataFrame for month headers
         for index, row in df.iterrows():
             # Check first column for month names
@@ -669,8 +678,10 @@ class DirectCostProcessor:
             # Check if this row contains our target month
             for variation in target_variations:
                 if variation in first_col_value:
-                    start_row = index + 1  # Start from the row AFTER the month header
-                    logger.info(f"Found month section '{target_month}' starting at row {start_row}")
+                    if not start_row_found:
+                        start_row = index + 1  # Start from the row AFTER the month header
+                        logger.info(f"Found month section '{target_month}' starting at row {start_row}")
+                        start_row_found = True
                     break
         
         # If we found a start but no end, process until the end of the data
@@ -681,6 +692,7 @@ class DirectCostProcessor:
                 if 'total' in first_col_value:
                     logger.debug(f"Found TOTAL row at index {index}, ending month section")
                     end_row = index
+                    start_row_found = False
                     break
 
         return start_row, end_row

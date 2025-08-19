@@ -12,3 +12,193 @@ For DC from the tab "VC Costs (Direct)":
 Copy and paste the data from column "TOTAL" in the P&L to the column "TOTAL DL costs" in the DC file
 If the DC name starts with "Recruiting costs", insert "Recruiting costs" in the "Bucket" column
 If not, insert "DC-other DC" in the "Bucket" column
+
+okovalchuk-test: Напиши опис, які є попередньо визначені категорії та чітко опиши алгоритм визначення яка витрата до якої категорії відноситься
+Напиши все що ти вважаєш допоможе краще зрозуміти логіку попереднього аналізу витрат
+
+GitHub Copilot: # Опис категорій та алгоритму класифікації витрат Direct Cost Master
+
+## Передумови та контекст
+
+Direct Cost Master обробляє файли P&L (Profit & Loss) у форматі Excel, які містять дані про прямі витрати за різні періоди. Кожен файл може містити дані за декілька місяців, але обробка відбувається для одного обраного місяця.
+
+Система працює з двома типами витрат:
+- **DL Costs (Direct Labor)** - прямі трудові витрати
+- **VC Costs (Variable Costs)** - змінні витрати
+
+## Попередньо визначені категорії (Buckets)
+
+### Для DL Costs (Direct Labor):
+1. **"Discrepancies & corrections from previous month"** - корекції з попереднього місяця
+2. **"PM role charge"** - витрати на роль проект-менеджера
+3. **"Paid overtime"** - оплачені понаднормові години
+4. **"Need clarification"** - базові зарплатні витрати (потребують уточнення)
+5. **"Sick leave"** - оплата лікарняних
+6. **"Medical Insurance"** - медичне страхування
+7. **"Bonus"** - бонуси та премії
+
+### Для VC Costs (Variable Costs):
+1. **"Discrepancies & corrections from previous month"** - корекції з попереднього місяця
+2. **"Recruiting cost"** - витрати на підбір персоналу
+3. **"DC - other DC"** - інші прямі витрати
+
+## Алгоритм класифікації DL Costs (пріоритет виконання)
+
+### Етап 1: Передобробка даних
+```python
+# Отримання значень з відповідних колонок
+total_hours_direct_val = get_cost('Total Hours Direct')
+total_dl_costs_val = get_cost('Total DL Costs')
+paid_overtime_val = get_cost('Paid Overtime')
+base_salary_val = get_cost('Base Salary')
+payroll_taxes_val = get_cost('Payroll Taxes')
+vacation_liability_val = get_cost('Accrued Vacation Liability')
+paid_vacation_val = get_cost('Paid Vacation')
+sick_leave_val = get_cost('Sick Leave Paid')
+medical_insurance_val = get_cost('Medical Insurance')
+bonus_val = get_cost('Unconditional Bonus')
+```
+
+### Етап 2: Класифікація (в порядку пріоритету)
+
+#### 1. **Перевірка на корекції** (найвищий пріоритет)
+```python
+if total_hours_direct_val < 0:
+    bucket = 'Discrepancies & corrections from previous month'
+    # ЗУПИНИТИ подальшу обробку цього рядка
+```
+**Логіка**: Від'ємні години завжди означають корекції з попереднього періоду.
+
+#### 2. **PM role charge** (спеціальний випадок)
+```python
+if 'pm role charge' in employee_ticket.lower():
+    bucket = 'PM role charge'
+    cost = total_dl_costs_val
+    # ЗУПИНИТИ подальшу обробку цього рядка
+```
+**Логіка**: Записи з "PM role charge" в імені завжди відносяться до витрат на проект-менеджмент.
+
+#### 3. **Paid Overtime** (включає базові компоненти)
+```python
+if paid_overtime_val > 0:
+    total_cost = paid_overtime_val + base_salary_val + payroll_taxes_val + 
+                 vacation_liability_val + paid_vacation_val
+    bucket = 'Paid overtime'
+```
+**Логіка**: Якщо є понаднормові, вони включають базову зарплату та всі пов'язані витрати.
+
+#### 4. **Need clarification** (базові витрати, якщо немає понаднормових)
+```python
+else:  # тільки якщо paid_overtime_val == 0
+    total_cost = base_salary_val + payroll_taxes_val + 
+                 vacation_liability_val + paid_vacation_val
+    bucket = 'Need clarification'
+```
+**Логіка**: Стандартні зарплатні витрати без понаднормових.
+
+#### 5-7. **Незалежні категорії** (можуть співіснувати з попередніми)
+
+##### 5. Sick Leave
+```python
+if sick_leave_val > 0:
+    bucket = 'Sick leave'
+    cost = sick_leave_val
+    hours = sick_hours_val
+```
+
+##### 6. Medical Insurance
+```python
+if medical_insurance_val > 0:
+    bucket = 'Medical Insurance'
+    cost = medical_insurance_val
+    hours = 0
+```
+
+##### 7. Bonus
+```python
+if bonus_val > 0:
+    bucket = 'Bonus'
+    cost = bonus_val
+    hours = 0
+```
+
+## Алгоритм класифікації VC Costs
+
+### Етап 1: Отримання значень
+```python
+recruiting_costs_val = get_vc_cost('VC.Recruiting Costs')
+hw_nonresellable_val = get_vc_cost('VC.HW-Nonresellable')
+sw_nonresellable_val = get_vc_cost('VC.SW-Nonresellable')
+travel_val = get_vc_cost('VC.Travel')
+communications_val = get_vc_cost('VC.Communications')
+other_direct_val = get_vc_cost('VC.Other.Direct')
+```
+
+### Етап 2: Класифікація VC
+
+#### 1. **Перевірка на корекції** (найвищий пріоритет)
+```python
+all_values = [recruiting_costs_val, hw_nonresellable_val, sw_nonresellable_val, 
+              travel_val, communications_val, other_direct_val]
+
+if any(val < 0 for val in all_values):
+    bucket = 'Discrepancies & corrections from previous month'
+    total_cost = sum(all_values)
+    # ЗУПИНИТИ подальшу обробку
+```
+
+#### 2. **Recruiting cost**
+```python
+if recruiting_costs_val > 0:
+    bucket = 'Recruiting cost'
+    cost = recruiting_costs_val
+```
+
+#### 3. **DC - other DC** (комбінування всіх інших витрат)
+```python
+other_dc_total = hw_nonresellable_val + sw_nonresellable_val + 
+                 travel_val + communications_val + other_direct_val
+
+if other_dc_total > 0:
+    bucket = 'DC - other DC'
+    cost = other_dc_total
+```
+
+## Ключові особливості логіки
+
+### 1. **Пріоритет обробки**
+- Корекції (від'ємні значення) мають найвищий пріоритет
+- PM role charge - спеціальний випадок
+- Paid Overtime включає базові компоненти
+- Незалежні категорії (Sick leave, Medical Insurance, Bonus) можуть співіснувати
+
+### 2. **Множинні записи з одного рядка**
+Один рядок Excel може генерувати декілька записів у різних категоріях:
+```python
+# Приклад: працівник може мати одночасно
+# - "Need clarification" (базова зарплата)
+# - "Sick leave" (лікарняні)
+# - "Medical Insurance" (страхування)
+```
+
+### 3. **Округлення**
+Всі грошові суми округлюються до 2 знаків після коми:
+```python
+return round(value, 2)
+```
+
+### 4. **Обробка помилок**
+- Пропускаються порожні рядки
+- Ігноруються рядки з "total" у назві
+- Логування помилок без зупинки обробки
+
+### 5. **Структура даних результату**
+Кожен запис містить:
+- **Employee/Item**: ім'я працівника або назва позиції
+- **Project**: назва проекту (з імені файлу)
+- **Month**: місяць обробки
+- **Bucket**: категорія витрат
+- **DC Hours**: кількість годин (0 для VC)
+- **Total DL costs**: загальна сума витрат
+
+Ця логіка забезпечує точну класифікацію всіх типів витрат згідно з бізнес-правилами організації.
