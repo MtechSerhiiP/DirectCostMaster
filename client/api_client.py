@@ -59,37 +59,6 @@ class APIClientService:
             raise Exception(f"Invalid response from server ({response.status_code})")
     
     # Authentication methods
-    def register_user(self, username: str, email: str, password: str, 
-                     first_name: str = None, last_name: str = None) -> Tuple[bool, str, Optional[Dict]]:
-        """Register a new user"""
-        try:
-            data = {
-                'username': username,
-                'email': email,
-                'password': password
-            }
-            if first_name:
-                data['first_name'] = first_name
-            if last_name:
-                data['last_name'] = last_name
-            
-            response = self.session.post(
-                f"{self.base_url}/api/v1/auth/register",
-                json=data,
-                headers={'Content-Type': 'application/json'}
-            )
-            
-            result = self._handle_response(response)
-            
-            if result.get('success'):
-                return True, result.get('message', 'Registration successful'), result.get('user')
-            else:
-                return False, result.get('message', 'Registration failed'), None
-                
-        except Exception as e:
-            logger.error(f"Registration error: {str(e)}")
-            return False, str(e), None
-    
     def login(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
         """Login user and store authentication token"""
         try:

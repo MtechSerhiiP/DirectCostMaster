@@ -5,7 +5,7 @@ A modern web-based application for processing P&L Excel files and consolidating 
 ## Features
 
 - **Modern Web Interface**: Clean, minimalist design with responsive layout
-- **User Authentication**: Secure login/register system with session management
+- **User Authentication**: Secure login system with session management
 - **PostgreSQL Database**: Persistent storage for processed data and user management
 - **Multiple File Processing**: Upload and process up to 20 Excel files simultaneously
 - **In-Memory File Processing**: Uses IOBytes approach - no temporary files on disk
@@ -86,8 +86,7 @@ After running `init_db.py`, you can log in with:
 ## How to Use
 
 ### Authentication
-1. **Register**: Create a new account or use the default admin account
-2. **Login**: Enter your credentials to access the application
+1. **Login**: Enter your credentials to access the application
 
 ### File Processing
 1. **Upload Files**: Drag and drop or click to upload up to 20 Excel P&L files

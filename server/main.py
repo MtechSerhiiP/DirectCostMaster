@@ -98,38 +98,6 @@ async def health_check():
 
 
 # Authentication endpoints
-@app.post("/api/v1/auth/register", response_model=UserRegistrationResponse)
-async def register_user(user_data: UserRegistrationRequest):
-    """Register a new user account"""
-    try:
-        success, message, user = auth_service.register_user(
-            username=user_data.username,
-            email=user_data.email,
-            password=user_data.password,
-            first_name=user_data.first_name,
-            last_name=user_data.last_name
-        )
-        
-        if success and user:
-            return UserRegistrationResponse(
-                success=True,
-                message=message,
-                user=UserInfo(
-                    id=user.id,
-                    username=user.username,
-                    email=user.email,
-                    first_name=user.first_name,
-                    last_name=user.last_name
-                )
-            )
-        else:
-            raise HTTPException(status_code=400, detail=message)
-            
-    except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Registration failed")
-
-
 @app.post("/api/v1/auth/login", response_model=LoginResponse)
 async def login_user(login_data: LoginRequest):
     """Authenticate user and receive JWT token"""

@@ -46,15 +46,9 @@ class DirectCostMasterClient:
         
         # Authentication UI components
         self.login_card = None
-        self.register_card = None
         self.user_info_card = None
         self.login_username = None
         self.login_password = None
-        self.register_username = None
-        self.register_email = None
-        self.register_password = None
-        self.register_first_name = None
-        self.register_last_name = None
         
         # Files management
         self.files_list_table = None
@@ -105,7 +99,7 @@ class DirectCostMasterClient:
             self.server_status_label.classes(add='text-red-500')
     
     def create_auth_section(self):
-        """Create authentication section with login and register forms."""
+        """Create authentication section with login forms."""
         # Login Card
         self.login_card = ui.card().classes('w-full max-w-md mx-auto p-6 shadow-lg')
         
@@ -118,29 +112,6 @@ class DirectCostMasterClient:
             with ui.row().classes('w-full gap-4'):
                 ui.button('Login', on_click=self.handle_login).classes(
                     'flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded'
-                )
-                ui.button('Register', on_click=self.show_register_form).classes(
-                    'flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded'
-                )
-        
-        # Register Card (initially hidden)
-        self.register_card = ui.card().classes('w-full max-w-md mx-auto p-6 shadow-lg mt-6 hidden')
-        
-        with self.register_card:
-            ui.label('Register New Account').classes('text-2xl font-bold text-center mb-6')
-            
-            self.register_username = ui.input('Username').classes('w-full mb-3')
-            self.register_email = ui.input('Email').classes('w-full mb-3')
-            self.register_first_name = ui.input('First Name (Optional)').classes('w-full mb-3')
-            self.register_last_name = ui.input('Last Name (Optional)').classes('w-full mb-3')
-            self.register_password = ui.input('Password', password=True).classes('w-full mb-4')
-            
-            with ui.row().classes('w-full gap-4'):
-                ui.button('Create Account', on_click=self.handle_register).classes(
-                    'flex-1 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 rounded'
-                )
-                ui.button('Back to Login', on_click=self.show_login_form).classes(
-                    'flex-1 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 rounded'
                 )
     
     def create_user_info_section(self):
@@ -188,48 +159,6 @@ class DirectCostMasterClient:
             logger.error(f"Login error: {str(e)}")
             ui.notify('Login failed. Please try again.', type='negative')
     
-    async def handle_register(self):
-        """Handle user registration via API"""
-        username = self.register_username.value
-        email = self.register_email.value
-        password = self.register_password.value
-        first_name = self.register_first_name.value
-        last_name = self.register_last_name.value
-        
-        if not username or not email or not password:
-            ui.notify('Please fill in required fields (username, email, password)', type='warning')
-            return
-        
-        # Check server connection first
-        if not api_client.check_server_health():
-            ui.notify('Server is not available. Please try again later.', type='negative')
-            return
-        
-        try:
-            success, message, user = api_client.register_user(
-                username=username,
-                email=email,
-                password=password,
-                first_name=first_name,
-                last_name=last_name
-            )
-            
-            if success:
-                ui.notify('Account created successfully! Please login.', type='positive')
-                self.show_login_form()
-                # Clear registration form
-                self.register_username.value = ''
-                self.register_email.value = ''
-                self.register_password.value = ''
-                self.register_first_name.value = ''
-                self.register_last_name.value = ''
-            else:
-                ui.notify(message, type='negative')
-                
-        except Exception as e:
-            logger.error(f"Registration error: {str(e)}")
-            ui.notify('Registration failed. Please try again.', type='negative')
-    
     def handle_logout(self):
         """Handle user logout"""
         try:
@@ -254,20 +183,16 @@ class DirectCostMasterClient:
             logger.error(f"Logout error: {str(e)}")
             ui.notify('Logout completed', type='info')
     
-    def show_register_form(self):
-        """Show registration form and hide login form"""
-        self.login_card.classes(add='hidden')
-        self.register_card.classes(remove='hidden')
     
     def show_login_form(self):
         """Show login form and hide registration form"""
-        self.register_card.classes(add='hidden')
         self.login_card.classes(remove='hidden')
+        self.main_content.classes(add='hidden')
+        self.user_info_card.classes(add='hidden')
     
     def show_main_application(self):
         """Show main application and hide auth forms"""
         self.login_card.classes(add='hidden')
-        self.register_card.classes(add='hidden')
         self.user_info_card.classes(remove='hidden')
         self.main_content.classes(remove='hidden')
         
@@ -776,13 +701,7 @@ class DirectCostMasterClient:
                 value=None  # Let user explicitly select a file
             ).classes('w-full mb-4')
             
-            # Container for dynamic proposal content; declare in enclosing scope so nested function can assign to it
-            proposal_content = None
-
             async def propose_reconcile():
-                # allow assignment to the enclosing proposal_content variable
-                nonlocal proposal_content
-
                 if not selected_file.value:
                     ui.notify('Please select a file', type='warning')
                     return
@@ -815,7 +734,7 @@ class DirectCostMasterClient:
                 proposed = result.get('proposed_additions', [])
                 total_amount = result.get('total_proposed_amount', 0)
                 
-                if proposal_content is None:
+                if not proposal_content:
                     proposal_content = ui.column().classes('w-full p-4')
 
                                 

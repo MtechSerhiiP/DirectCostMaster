@@ -73,56 +73,6 @@ class AuthAPIService:
         logger.info("JWT secret key validated successfully")
         return secret
     
-    def register_user(self, username: str, email: str, password: str, 
-                     first_name: str = None, last_name: str = None) -> Tuple[bool, str, Optional[User]]:
-        """
-        Register a new user (same logic as before)
-        
-        Args:
-            username: Unique username
-            email: User email
-            password: Plain text password
-            first_name: Optional first name
-            last_name: Optional last name
-            
-        Returns:
-            Tuple of (success, message, user_object)
-        """
-        db_session = db_config.get_session()
-        try:
-            # Check if username or email already exists
-            existing_user = db_session.query(User).filter(
-                (User.username == username) | (User.email == email)
-            ).first()
-            
-            if existing_user:
-                if existing_user.username == username:
-                    return False, "Username already exists", None
-                else:
-                    return False, "Email already exists", None
-            
-            # Create new user
-            new_user = User(
-                username=username,
-                email=email,
-                first_name=first_name,
-                last_name=last_name
-            )
-            new_user.set_password(password)
-            
-            db_session.add(new_user)
-            db_session.commit()
-            
-            logger.info(f"New user registered: {username}")
-            return True, "User registered successfully", new_user
-            
-        except Exception as e:
-            db_session.rollback()
-            logger.error(f"Error registering user: {str(e)}")
-            return False, f"Registration failed: {str(e)}", None
-        finally:
-            db_session.close()
-    
     def authenticate_user(self, username: str, password: str) -> Tuple[bool, str, Optional[User], Optional[str]]:
         """
         Authenticate user and generate JWT token
