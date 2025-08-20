@@ -765,8 +765,7 @@ class DirectCostMasterClient:
             ui.notify('Please upload at least one P&L file to propose reconciliation', type='warning')
             return
         
-        content = ui.column().classes('p-4')
-        with ui.dialog().classes('w-2/3') as dialog, content:
+        with ui.dialog().classes('w-2/3') as dialog, ui.card().classes('p-4'):
             ui.label('Program P&L Reconciliation').classes('text-lg font-bold mb-4')
             
             # Create dropdown for file selection
@@ -777,7 +776,13 @@ class DirectCostMasterClient:
                 value=None  # Let user explicitly select a file
             ).classes('w-full mb-4')
             
+            # Container for dynamic proposal content; declare in enclosing scope so nested function can assign to it
+            proposal_content = None
+
             async def propose_reconcile():
+                # allow assignment to the enclosing proposal_content variable
+                nonlocal proposal_content
+
                 if not selected_file.value:
                     ui.notify('Please select a file', type='warning')
                     return
@@ -810,10 +815,13 @@ class DirectCostMasterClient:
                 proposed = result.get('proposed_additions', [])
                 total_amount = result.get('total_proposed_amount', 0)
                 
-                # Clear previous content if any
-                content.clear()
-                
-                with content:
+                if proposal_content is None:
+                    proposal_content = ui.column().classes('w-full p-4')
+
+                                
+                with proposal_content:
+                    proposal_content.clear()
+                    # Show proposal details
                     ui.label(f'Reconciliation proposal for {program_name}').classes('text-lg font-bold')
                     ui.label(f'Period: {period}').classes('text-md text-gray-600')
                     ui.label(f'Proposed additions: {len(proposed)} | Total amount: {total_amount}').classes('text-sm text-gray-600 mb-4')
