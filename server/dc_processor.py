@@ -155,7 +155,7 @@ class DirectCostProcessor:
                 }
                 
                 # Map original column names to standard names
-                column_mapping = self._create_column_mapping(month_data.columns)
+                column_mapping = self._create_dl_column_mapping(month_data.columns)
                 reverse_column_mapping = {v: k for k, v in column_mapping.items()}
 
                 def get_cost(standard_name):
@@ -177,6 +177,7 @@ class DirectCostProcessor:
                 sick_leave_val = get_cost('Sick Leave Paid')
                 medical_insurance_val = get_cost('Medical Insurance')
                 bonus_val = get_cost('Unconditional Bonus')
+                incentive_bonus_val = get_cost('Incentive Bonus')
 
                 # Get associated hours
                 direct_hours_val = get_cost('Hours Direct')
@@ -257,6 +258,16 @@ class DirectCostProcessor:
                         'Bucket': 'Bonus',
                         'DC Hours': 0,
                         'Total DL costs': round(bonus_val, 2)
+                    })
+                    processed_records.append(record)
+
+                # Rule 5: CFLG Bonus (independent)
+                if incentive_bonus_val > 0:
+                    record = base_record_info.copy()
+                    record.update({
+                        'Bucket': 'CFLG Bonus',
+                        'DC Hours': 0,
+                        'Total DL costs': round(incentive_bonus_val, 2)
                     })
                     processed_records.append(record)
 
@@ -364,9 +375,15 @@ class DirectCostProcessor:
 
                 def get_vc_cost(standard_name):
                     col = reverse_column_mapping.get(standard_name)
-                    value = float(row.get(col, 0) or 0) if col else 0
-                    # Round all VC cost values to 2 decimal places
-                    return round(value, 2)
+                    if col and col in row:
+                        value = row[col]
+                        if pd.isna(value) or value == '' or value is None:
+                            return 0.0
+                        try:
+                            return round(float(value), 2)
+                        except (ValueError, TypeError):
+                            return 0.0
+                    return 0.0
 
                 # Get all potential cost values
                 recruiting_costs_val = get_vc_cost('VC.Recruiting Costs')
@@ -375,6 +392,8 @@ class DirectCostProcessor:
                 travel_val = get_vc_cost('VC.Travel')
                 communications_val = get_vc_cost('VC.Communications')
                 other_direct_val = get_vc_cost('VC.Other.Direct')
+
+                print(f"Row {index} costs: Recruiting={recruiting_costs_val}, HW={hw_nonresellable_val}, SW={sw_nonresellable_val}, Travel={travel_val}, Comm={communications_val}, Other={other_direct_val}")
 
                 # Check for negative values (Discrepancies & corrections)
                 all_values = [recruiting_costs_val, hw_nonresellable_val, sw_nonresellable_val, 
@@ -400,7 +419,7 @@ class DirectCostProcessor:
                     })
                     processed_records.append(record)
 
-                # Rule 1: Recruiting cost
+                # Rule 2: Travel cost
                 if travel_val > 0:
                     record = base_record_info.copy()
                     record.update({
@@ -409,7 +428,7 @@ class DirectCostProcessor:
                     })
                     processed_records.append(record)
 
-                # Rule 2: DC - other DC (combine all other direct costs)
+                # Rule 3: DC - other DC (combine all other direct costs)
                 other_dc_total = hw_nonresellable_val + sw_nonresellable_val + communications_val + other_direct_val
                 other_dc_total = round(other_dc_total, 2)  # Round to 2 decimal places
                 if other_dc_total > 0:
@@ -427,10 +446,10 @@ class DirectCostProcessor:
         logger.info(f"Processed {len(processed_records)} VC Cost records for {target_month}")
         return processed_records
     
-    def _create_column_mapping(self, columns: List[str]) -> Dict[str, str]:
+    def _create_dl_column_mapping(self, columns: List[str]) -> Dict[str, str]:
         """
         Create a mapping from actual column names to standardized names.
-        Uses position-based mapping for Unnamed columns based on typical Excel structure.
+        Uses content-based matching instead of position-based for flexibility.
         
         Args:
             columns: List of actual column names from the DataFrame
@@ -440,24 +459,6 @@ class DirectCostProcessor:
         """
         mapping = {}
         
-        # Expected column positions based on the Excel structure you showed
-        expected_positions = {
-            0: 'Employee/Ticket',  # First column is always Employee/Ticket
-            1: 'TOTAL Hours direct',
-            2: 'Hours direct', 
-            3: 'Hours sick leave paid by project',
-            4: 'Man-months direct',
-            5: 'TOTAL DL costs',
-            6: 'Base salary',
-            7: 'Sick leave Paid by Project',
-            8: 'Paid overtime',
-            9: 'Unconditional Bonus',
-            10: 'Payroll taxes',
-            11: 'Accrued Vacation Liability',
-            12: 'Paid vacation',
-            13: 'VC.Medical Insurance'
-        }
-        
         for i, col in enumerate(columns):
             col_str = str(col).strip()
             col_lower = col_str.lower()
@@ -466,15 +467,15 @@ class DirectCostProcessor:
             if i == 0:
                 continue
             
-            # Handle Unnamed columns by position
+            # For Unnamed columns, try to infer from position as fallback,
+            # but prioritize content-based matching when possible
             if 'unnamed' in col_lower or col_str.startswith('Unnamed'):
-                if i in expected_positions:
-                    standard_name = self._get_standard_name_for_position(i)
-                    if standard_name:
-                        mapping[col] = standard_name
+                # Use position as fallback only - this should be improved with 
+                # actual data inspection in future iterations
+                mapping[col] = f"Unknown_Position_{i}"
                 continue
             
-            # Handle named columns
+            # Handle named columns using content-based matching
             standard_name = self._map_named_column(col_str)
             if standard_name:
                 mapping[col] = standard_name
@@ -483,10 +484,11 @@ class DirectCostProcessor:
                 mapping[col] = col
         
         return mapping
-    
+
     def _create_vc_column_mapping(self, columns: List[str]) -> Dict[str, str]:
         """
         Create a mapping from actual VC column names to standardized names.
+        Uses content-based matching instead of position-based for flexibility.
         
         Args:
             columns: List of actual column names from the VC DataFrame
@@ -496,19 +498,6 @@ class DirectCostProcessor:
         """
         mapping = {}
         
-        # Expected VC column positions
-        expected_vc_positions = {
-            0: 'Items',
-            1: 'TicketID', 
-            2: 'TOTAL',
-            3: 'VC.HW-Nonresellable',
-            4: 'VC.SW-Nonresellable',
-            5: 'VC.Travel',
-            6: 'VC.Communications',
-            7: 'VC.Recruiting Costs',
-            8: 'VC.Other.Direct'
-        }
-        
         for i, col in enumerate(columns):
             col_str = str(col).strip()
             col_lower = col_str.lower()
@@ -517,14 +506,15 @@ class DirectCostProcessor:
             if i == 0:
                 continue
             
-            # Handle Unnamed columns by position
+            # For Unnamed columns, try to infer from position as fallback,
+            # but prioritize content-based matching when possible
             if 'unnamed' in col_lower or col_str.startswith('Unnamed'):
-                if i in expected_vc_positions:
-                    standard_name = expected_vc_positions[i]
-                    mapping[col] = standard_name
+                # Use position as fallback only - this should be improved with 
+                # actual data inspection in future iterations
+                mapping[col] = f"Unknown_Position_{i}"
                 continue
             
-            # Handle named columns
+            # Handle named columns using content-based matching
             standard_name = self._map_vc_named_column(col_str)
             if standard_name:
                 mapping[col] = standard_name
@@ -567,33 +557,33 @@ class DirectCostProcessor:
         else:
             return None
     
-    def _get_standard_name_for_position(self, position: int) -> Optional[str]:
-        """
-        Get standardized column name based on position in Excel sheet.
+    # def _get_standard_name_for_position(self, position: int) -> Optional[str]:
+    #     """
+    #     Get standardized column name based on position in Excel sheet.
         
-        Args:
-            position: 0-based column position
+    #     Args:
+    #         position: 0-based column position
             
-        Returns:
-            Standard column name or None if position not recognized
-        """
-        position_mapping = {
-            1: 'Total Hours Direct',
-            2: 'Hours Direct',
-            3: 'Sick Leave Hours', 
-            4: 'Man-Months Direct',
-            5: 'Total DL Costs',
-            6: 'Base Salary',
-            7: 'Sick Leave Paid',
-            8: 'Paid Overtime',
-            9: 'Unconditional Bonus',
-            10: 'Payroll Taxes',
-            11: 'Accrued Vacation Liability',
-            12: 'Paid Vacation',
-            13: 'Medical Insurance'
-        }
+    #     Returns:
+    #         Standard column name or None if position not recognized
+    #     """
+    #     position_mapping = {
+    #         1: 'Total Hours Direct',
+    #         2: 'Hours Direct',
+    #         3: 'Sick Leave Hours', 
+    #         4: 'Man-Months Direct',
+    #         5: 'Total DL Costs',
+    #         6: 'Base Salary',
+    #         7: 'Sick Leave Paid',
+    #         8: 'Paid Overtime',
+    #         9: 'Unconditional Bonus',
+    #         10: 'Payroll Taxes',
+    #         11: 'Accrued Vacation Liability',
+    #         12: 'Paid Vacation',
+    #         13: 'Medical Insurance'
+    #     }
         
-        return position_mapping.get(position)
+    #     return position_mapping.get(position)
     
     def _map_named_column(self, col_name: str) -> Optional[str]:
         """

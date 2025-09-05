@@ -701,6 +701,9 @@ class DirectCostMasterClient:
                 value=None  # Let user explicitly select a file
             ).classes('w-full mb-4')
             
+            # Create placeholder for proposal content
+            proposal_content = ui.column().classes('w-full p-4')
+            
             async def propose_reconcile():
                 if not selected_file.value:
                     ui.notify('Please select a file', type='warning')
@@ -733,10 +736,6 @@ class DirectCostMasterClient:
                 period = result.get('period')
                 proposed = result.get('proposed_additions', [])
                 total_amount = result.get('total_proposed_amount', 0)
-                
-                if not proposal_content:
-                    proposal_content = ui.column().classes('w-full p-4')
-
                                 
                 with proposal_content:
                     proposal_content.clear()

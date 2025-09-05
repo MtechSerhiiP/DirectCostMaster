@@ -27,7 +27,7 @@ def test_column_mapping():
     ]
     
     processor = DirectCostProcessor()
-    mapping = processor._create_column_mapping(test_columns)
+    mapping = processor._create_dl_column_mapping(test_columns)
     
     print("\n📋 Column Mapping Results:")
     for original, mapped in mapping.items():
