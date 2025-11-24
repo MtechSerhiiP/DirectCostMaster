@@ -19,10 +19,11 @@ import uuid
 from contextlib import asynccontextmanager
 
 # Import our existing modules (adapted for API use)
-from auth_service import AuthAPIService
-from processing_service import ProcessingAPIService
-from data_service import DataAPIService
-from models import db_config
+from auth_service import auth_api_service
+from processing_service import processing_api_service
+from data_service import data_api_service
+from auth_models import auth_db_config
+from memory_data_service import memory_data_service
 from schemas import *
 
 # Load environment variables
@@ -32,10 +33,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Global services
-auth_service = AuthAPIService()
-processing_service = ProcessingAPIService()
-data_service = DataAPIService()
+# Global services (use the global instances)
+auth_service = auth_api_service
+processing_service = processing_api_service
+data_service = data_api_service
 
 # Security
 security = HTTPBearer()
@@ -46,8 +47,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan management"""
     # Startup
     try:
-        db_config.create_tables()
-        logger.info("Database initialized successfully")
+        auth_db_config.create_tables()
+        logger.info("Authentication database initialized successfully")
+        logger.info("In-memory data service ready - DL/VC records will be stored in memory")
     except Exception as e:
         logger.error(f"Database initialization failed: {str(e)}")
         # Continue without database in development

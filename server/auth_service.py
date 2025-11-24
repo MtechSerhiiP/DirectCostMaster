@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 import logging
 from dotenv import load_dotenv
-# Import existing models (we'll use the same User model)
-from models import User, db_config
+# Import authentication-only models
+from auth_models import User, auth_db_config
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class AuthAPIService:
             RuntimeError: If no secure secret is configured
         """
         secret = os.getenv('JWT_SECRET_KEY')
-
+        print(secret)
         # CRITICAL SECURITY: Refuse to start without proper secret
         if not secret:
             raise RuntimeError(
@@ -84,7 +84,9 @@ class AuthAPIService:
         Returns:
             Tuple of (success, message, user_object, jwt_token)
         """
-        db_session = db_config.get_session()
+        db_session = auth_db_config.get_session()
+        if not db_session:
+            return False, "Authentication database unavailable", None, None
         try:
             # Find user by username or email
             user = db_session.query(User).filter(
@@ -173,7 +175,10 @@ class AuthAPIService:
             
             # Optimized: Only check user existence if token is valid and recent
             # For frequently accessed tokens, consider implementing caching here
-            db_session = db_config.get_session()
+            db_session = auth_db_config.get_session()
+            if not db_session:
+                logger.warning("Token verification failed: Authentication database unavailable")
+                return None
             try:
                 user = db_session.query(User).filter(
                     and_(User.id == user_id, User.is_active == True)
@@ -226,7 +231,9 @@ class AuthAPIService:
                 return None
             
             # Get user from database
-            db_session = db_config.get_session()
+            db_session = auth_db_config.get_session()
+            if not db_session:
+                return None
             try:
                 user = db_session.query(User).filter(
                     and_(User.id == payload['id'], User.is_active == True)
@@ -248,7 +255,9 @@ class AuthAPIService:
     
     def get_user_by_id(self, user_id: int) -> Optional[User]:
         """Get user by ID (same as before)"""
-        db_session = db_config.get_session()
+        db_session = auth_db_config.get_session()
+        if not db_session:
+            return None
         try:
             return db_session.query(User).filter(
                 and_(User.id == user_id, User.is_active == True)

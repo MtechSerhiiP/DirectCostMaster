@@ -12,7 +12,7 @@ from pathlib import Path
 import logging
 
 # Import existing services
-from database_service import db_service
+from memory_data_service import memory_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ class DataAPIService:
             Dictionary with summary information
         """
         try:
-            # Get data from database service
-            dl_df, vc_df = db_service.get_user_data(user_id, period, project)
+            # Get data from memory service
+            dl_df, vc_df = memory_data_service.get_user_data(user_id, period, project)
             
             # Calculate summary statistics
             total_records = len(dl_df) + len(vc_df)
@@ -64,7 +64,7 @@ class DataAPIService:
                     unique_projects.update(vc_df['Project'].unique())
             
             # Get all available periods and projects for user
-            all_dl_df, all_vc_df = db_service.get_user_data(user_id)
+            all_dl_df, all_vc_df = memory_data_service.get_user_data(user_id)
             
             all_periods = set()
             all_projects = set()
@@ -114,7 +114,7 @@ class DataAPIService:
         """
         try:
             # Get all matching records
-            dl_df, _ = db_service.get_user_data(user_id, period, project)
+            dl_df, _ = memory_data_service.get_user_data(user_id, period, project)
             
             if dl_df.empty:
                 return {
@@ -181,7 +181,7 @@ class DataAPIService:
         """
         try:
             # Get all matching records
-            _, vc_df = db_service.get_user_data(user_id, period, project)
+            _, vc_df = memory_data_service.get_user_data(user_id, period, project)
             
             if vc_df.empty:
                 return {
@@ -247,7 +247,7 @@ class DataAPIService:
         """
         try:
             # Get data
-            dl_df, vc_df = db_service.get_user_data(user_id, period, project)
+            dl_df, vc_df = memory_data_service.get_user_data(user_id, period, project)
             
             if (dl_df.empty and vc_df.empty) or (not include_dl and not include_vc):
                 raise ValueError("No data to export")
@@ -348,7 +348,7 @@ class DataAPIService:
             Tuple of (success, message)
         """
         try:
-            return db_service.clear_user_data(user_id, period, project)
+            return memory_data_service.clear_user_data(user_id, period, project)
         except Exception as e:
             logger.error(f"Error clearing user data: {str(e)}")
             return False, f"Failed to clear data: {str(e)}"
@@ -364,7 +364,7 @@ class DataAPIService:
             List of project dictionaries
         """
         try:
-            projects = db_service.get_user_projects(user_id)
+            projects = memory_data_service.get_user_projects(user_id)
             
             # Convert to API format
             api_projects = []
@@ -414,7 +414,7 @@ class DataAPIService:
             Dictionary with detailed statistics
         """
         try:
-            dl_df, vc_df = db_service.get_user_data(user_id)
+            dl_df, vc_df = memory_data_service.get_user_data(user_id)
             
             stats = {
                 'total_records': len(dl_df) + len(vc_df),

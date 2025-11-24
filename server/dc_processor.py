@@ -178,60 +178,113 @@ class DirectCostProcessor:
                 medical_insurance_val = get_cost('Medical Insurance')
                 bonus_val = get_cost('Unconditional Bonus')
                 incentive_bonus_val = get_cost('Incentive Bonus')
+                other_dl_val = get_cost('Other DL')
 
                 # Get associated hours
                 direct_hours_val = get_cost('Hours Direct')
                 sick_hours_val = get_cost('Sick Leave Hours')
-
-                # New Rule: Discrepancies & corrections from previous month
-                if total_hours_direct_val < 0:
+                
+                # Determine if this is a PM role charge
+                is_pm_role_charge = 'pm role charge' in employee_ticket.lower() or 'pm charge role' in employee_ticket.lower()
+                
+                # Handle negative sick leave separately
+                if sick_leave_val < 0 or sick_hours_val < 0:
                     record = base_record_info.copy()
                     record.update({
                         'Bucket': 'Discrepancies & corrections from previous month',
-                        'DC Hours': total_hours_direct_val,
-                        'Total DL costs': round(total_dl_costs_val, 2)
+                        'DC Hours': sick_hours_val,
+                        'Total DL costs': round(sick_leave_val, 2)
                     })
                     processed_records.append(record)
-                    continue # Skip all other bucketing for this row
-
-                # Handle PM role charge as a special case
-                if 'pm role charge' in employee_ticket.lower() or 'pm charge role' in employee_ticket.lower():
-                    if total_dl_costs_val > 0:
+                    # Don't skip - continue processing other components
+                
+                # Handle negative base components as discrepancies
+                if direct_hours_val <= 0:
+                    # Calculate discrepancy total from negative base components only
+                    discrepancy_cost = 0
+                    discrepancy_hours = 0
+                    
+                    if direct_hours_val < 0:
+                        discrepancy_hours = direct_hours_val
+                    if paid_overtime_val < 0:
+                        discrepancy_cost += paid_overtime_val
+                    if base_salary_val < 0:
+                        discrepancy_cost += base_salary_val
+                    if payroll_taxes_val < 0:
+                        discrepancy_cost += payroll_taxes_val
+                    if vacation_liability_val < 0:
+                        discrepancy_cost += vacation_liability_val
+                    if other_dl_val < 0:
+                        discrepancy_cost += other_dl_val
+                    if paid_vacation_val > 0:
+                        discrepancy_cost += paid_vacation_val
+                    
+                    if discrepancy_cost != 0 or discrepancy_hours != 0:
                         record = base_record_info.copy()
                         record.update({
-                            'Bucket': 'PM role charge',
-                            'DC Hours': direct_hours_val,
-                            'Total DL costs': round(total_dl_costs_val, 2)
+                            'Bucket': 'Discrepancies & corrections from previous month',
+                            'DC Hours': discrepancy_hours,
+                            'Total DL costs': round(discrepancy_cost, 2)
                         })
                         processed_records.append(record)
-                    continue
-
-                # Rule 5: Paid Overtime (must be checked first as it includes base salary components)
-                if paid_overtime_val > 0:
-                    total_cost = paid_overtime_val + base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
-                    total_cost = round(total_cost, 2)  # Round to 2 decimal places
-                    if total_cost > 0:
-                        record = base_record_info.copy()
-                        record.update({
-                            'Bucket': 'Paid overtime',
-                            'DC Hours': direct_hours_val,
-                            'Total DL costs': total_cost
-                        })
-                        processed_records.append(record)
+                    
+                # Handle main cost buckets based on PM role charge vs regular employee
+                if is_pm_role_charge:
+                    # PM role charge: only base salary, payroll taxes, vacation liability, and paid vacation
+                    if paid_overtime_val > 0:
+                        # For PM with overtime, include overtime in PM role charge bucket
+                        total_cost = paid_overtime_val + base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val + medical_insurance_val
+                        total_cost = round(total_cost, 2)
+                        if total_cost > 0:
+                            record = base_record_info.copy()
+                            record.update({
+                                'Bucket': 'PM role charge',
+                                'DC Hours': direct_hours_val,
+                                'Total DL costs': total_cost
+                            })
+                            processed_records.append(record)
+                    else:
+                        # PM without overtime
+                        total_cost = base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
+                        total_cost = round(total_cost, 2)
+                        if total_cost > 0:
+                            total_cost += medical_insurance_val
+                            record = base_record_info.copy()
+                            record.update({
+                                'Bucket': 'PM role charge',
+                                'DC Hours': direct_hours_val,
+                                'Total DL costs': total_cost
+                            })
+                            processed_records.append(record)
                 else:
-                    # Rule 1: Need clarification (only if not overtime)
-                    total_cost = base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val
-                    total_cost = round(total_cost, 2)  # Round to 2 decimal places
-                    if total_cost > 0:
-                        record = base_record_info.copy()
-                        record.update({
-                            'Bucket': 'Need clarification',
-                            'DC Hours': direct_hours_val,
-                            'Total DL costs': total_cost
-                        })
-                        processed_records.append(record)
+                    # Regular employee processing
+                    # Rule 5: Paid Overtime (must be checked first as it includes base salary components)
+                    if paid_overtime_val > 0:
+                        total_cost = paid_overtime_val + base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val + medical_insurance_val
+                        total_cost = round(total_cost, 2)  # Round to 2 decimal places
+                        if total_cost > 0:
+                            record = base_record_info.copy()
+                            record.update({
+                                'Bucket': 'Paid overtime',
+                                'DC Hours': direct_hours_val,
+                                'Total DL costs': total_cost
+                            })
+                            processed_records.append(record)
+                    else:
+                        # Rule 1: Need clarification (only if not overtime)
+                        total_cost = base_salary_val + payroll_taxes_val + vacation_liability_val + paid_vacation_val + other_dl_val
+                        total_cost = round(total_cost, 2)  # Round to 2 decimal places
+                        if total_cost > 0:
+                            total_cost += medical_insurance_val
+                            record = base_record_info.copy()
+                            record.update({
+                                'Bucket': 'Need clarification',
+                                'DC Hours': direct_hours_val,
+                                'Total DL costs': total_cost
+                            })
+                            processed_records.append(record)
 
-                # Rule 2: Sick leave (independent)
+                # Rule 2: Sick leave (independent - applies to both PM and regular employees)
                 if sick_leave_val > 0:
                     record = base_record_info.copy()
                     record.update({
@@ -241,8 +294,8 @@ class DirectCostProcessor:
                     })
                     processed_records.append(record)
 
-                # Rule 3: Medical Insurance (independent)
-                if medical_insurance_val > 0:
+                # Rule 3: Medical Insurance (independent - applies to both PM and regular employees)
+                if medical_insurance_val > 0 and (medical_insurance_val == total_dl_costs_val):
                     record = base_record_info.copy()
                     record.update({
                         'Bucket': 'Medical Insurance',
@@ -251,7 +304,7 @@ class DirectCostProcessor:
                     })
                     processed_records.append(record)
 
-                # Rule 4: Bonus (independent)
+                # Rule 4: Bonus (independent - applies to both PM and regular employees)
                 if bonus_val > 0:
                     record = base_record_info.copy()
                     record.update({
@@ -261,7 +314,7 @@ class DirectCostProcessor:
                     })
                     processed_records.append(record)
 
-                # Rule 5: CFLG Bonus (independent)
+                # Rule 5: CFLG Bonus (independent - applies to both PM and regular employees)
                 if incentive_bonus_val > 0:
                     record = base_record_info.copy()
                     record.update({
@@ -624,6 +677,8 @@ class DirectCostProcessor:
             return 'Accrued Vacation Liability'
         elif 'paid vacation' in col_lower:
             return 'Paid Vacation'
+        elif 'other dl' in col_lower:
+            return 'Other DL'
         elif 'medical insurance' in col_lower or 'vc.medical' in col_lower:
             return 'Medical Insurance'
         else:

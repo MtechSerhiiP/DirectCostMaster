@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server/temp_files:/app/temp_files
+      - ./server/temp_exports:/app/temp_exports
+      - ./auth.db:/app/auth.db
+    networks:
+      - app-network
+
+  client:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - server
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

@@ -16,7 +16,7 @@ from pathlib import Path
 
 # Import existing processing logic
 from dc_processor import DirectCostProcessor
-from database_service import db_service
+from memory_data_service import memory_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -160,16 +160,16 @@ class ProcessingAPIService:
                         all_records.extend(processed_records)
                         successful_files += 1
                         
-                        # Save to database
-                        db_success, db_message, db_dl_count, db_vc_count = db_service.save_processed_data(
+                        # Save to memory instead of database
+                        memory_success, memory_message, memory_dl_count, memory_vc_count = memory_data_service.save_processed_data(
                             processed_records, 
                             user_id, 
                             filename, 
                             selected_period
                         )
                         
-                        if not db_success:
-                            logger.error(f"Database save failed for {filename}: {db_message}")
+                        if not memory_success:
+                            logger.error(f"Memory save failed for {filename}: {memory_message}")
                         
                         logger.info(f"Successfully processed {len(processed_records)} records from {filename}")
                     else:
@@ -342,8 +342,8 @@ class ProcessingAPIService:
         selected_period = f"{month} {year}"
         program_records = program_processor.process_file_for_month(excel_data, file_info['filename'], selected_period)
 
-        # Load user's existing data for that period
-        dl_df, vc_df = db_service.get_user_data(user_id, period=selected_period)
+        # Load user's existing data for that period from memory
+        dl_df, vc_df = memory_data_service.get_user_data(user_id, period=selected_period)
 
         # Build keys for matching: Employee/Item + Bucket
         existing_dl = {}
@@ -459,8 +459,8 @@ class ProcessingAPIService:
                 applied_vc += 1
 
         if to_save:
-            # Save using db_service.save_processed_data which expects processed_records list
-            success, message, dl_count, vc_count = db_service.save_processed_data(to_save, user_id, file_info['filename'], period)
+            # Save using memory_data_service.save_processed_data which expects processed_records list
+            success, message, dl_count, vc_count = memory_data_service.save_processed_data(to_save, user_id, file_info['filename'], period)
             if not success:
                 raise ValueError(message)
 

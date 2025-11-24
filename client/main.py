@@ -80,6 +80,8 @@ class DirectCostMasterClient:
             with ui.column().classes('text-left'):
                 ui.label('Direct Cost Master').classes('text-4xl font-bold text-blue-600 mb-2')
                 ui.label('Excel File Processing Application').classes('text-lg text-gray-600')
+                # Add memory mode indicator
+                ui.label('🧠 Memory Mode: Data stored in memory (faster, but temporary)').classes('text-sm text-orange-600 font-medium mt-1')
             
             with ui.column().classes('text-right'):
                 self.server_status_label = ui.label().classes('text-sm')
