@@ -195,21 +195,25 @@ async def start_processing(
     try:
         job_id = str(uuid.uuid4())
         
-        # Start background processing
+        # Start background processing with analysis mode
         background_tasks.add_task(
             processing_service.process_files_async,
             job_id=job_id,
             file_ids=process_request.file_ids,
             month=process_request.month,
             year=process_request.year,
-            user_id=current_user['id']
+            user_id=current_user['id'],
+            analysis_mode=process_request.analysis_mode
         )
+        
+        # Estimate duration based on mode
+        estimated_duration = 30 if process_request.analysis_mode == 'single' else 60
         
         return ProcessingStartResponse(
             success=True,
-            message="Processing started",
+            message=f"Processing started ({process_request.analysis_mode} mode)",
             job_id=job_id,
-            estimated_duration=30
+            estimated_duration=estimated_duration
         )
         
     except Exception as e:

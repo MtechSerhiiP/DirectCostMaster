@@ -67,6 +67,7 @@ class ProcessingRequest(BaseModel):
     file_ids: List[str]
     month: str
     year: str
+    analysis_mode: str = "single"  # 'single' for single month, 'ytd' for Year-to-Date
 
 
 class ProcessingStartResponse(BaseModel):
@@ -74,6 +75,14 @@ class ProcessingStartResponse(BaseModel):
     message: str
     job_id: str
     estimated_duration: int
+
+
+class YTDValidationWarning(BaseModel):
+    """Warning info about missing months in YTD processing"""
+    filename: str
+    missing_months: List[str]
+    processed_months: List[str]
+    message: str
 
 
 class ProcessingResults(BaseModel):
@@ -84,6 +93,7 @@ class ProcessingResults(BaseModel):
     successful_files: int
     failed_files: int
     error_details: Optional[List[str]] = None
+    ytd_warnings: Optional[List[YTDValidationWarning]] = None  # Warnings about missing months
 
 
 class ProcessingStatusResponse(BaseModel):

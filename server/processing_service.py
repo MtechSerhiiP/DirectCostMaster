@@ -97,7 +97,8 @@ class ProcessingAPIService:
             return file_info
         return None
     
-    async def process_files_async(self, job_id: str, file_ids: List[str], month: str, year: str, user_id: int):
+    async def process_files_async(self, job_id: str, file_ids: List[str], month: str, year: str, 
+                                   user_id: int, analysis_mode: str = "single"):
         """
         Asynchronously process multiple files
         
@@ -107,6 +108,7 @@ class ProcessingAPIService:
             month: Target month
             year: Target year
             user_id: User ID
+            analysis_mode: 'single' for single month, 'ytd' for Year-to-Date
         """
         # Initialize job status
         self.processing_jobs[job_id] = {
@@ -117,6 +119,7 @@ class ProcessingAPIService:
             'started_at': datetime.utcnow(),
             'file_ids': file_ids,
             'period': f"{month} {year}",
+            'analysis_mode': analysis_mode,
             'results': None,
             'error_message': None
         }
@@ -127,6 +130,7 @@ class ProcessingAPIService:
             successful_files = 0
             failed_files = []
             all_records = []
+            ytd_warnings = []  # Track missing months warnings
             
             for i, file_id in enumerate(file_ids):
                 try:
@@ -148,19 +152,41 @@ class ProcessingAPIService:
                     file_io = io.BytesIO(file_content)
                     excel_data = pd.read_excel(file_io, sheet_name=None, engine='openpyxl')
                     
-                    # Process using existing DC processor
-                    selected_period = f"{month} {year}"
-                    processed_records = self.dc_processor.process_file_for_month(
-                        excel_data, 
-                        filename,
-                        selected_period
-                    )
+                    if analysis_mode == 'ytd':
+                        # YTD mode: process all months from January to selected month
+                        processed_records, processed_months, missing_months = self.dc_processor.process_file_for_ytd(
+                            excel_data,
+                            filename,
+                            month,
+                            year
+                        )
+                        
+                        # Create warning if some months are missing
+                        if missing_months:
+                            ytd_warnings.append({
+                                'filename': filename,
+                                'missing_months': missing_months,
+                                'processed_months': processed_months,
+                                'message': f"File '{filename}': Missing data for {len(missing_months)} month(s): {', '.join(missing_months)}"
+                            })
+                            logger.warning(f"YTD processing for {filename}: missing months {missing_months}")
+                        
+                        selected_period = f"{month} {year}"
+                    else:
+                        # Single month mode (existing behavior)
+                        selected_period = f"{month} {year}"
+                        processed_records = self.dc_processor.process_file_for_month(
+                            excel_data, 
+                            filename,
+                            selected_period
+                        )
                     
                     if processed_records:
                         all_records.extend(processed_records)
                         successful_files += 1
                         
-                        # Save to memory instead of database
+                        # Save to memory
+                        # For YTD mode, we still save individual records with their Month field
                         memory_success, memory_message, memory_dl_count, memory_vc_count = memory_data_service.save_processed_data(
                             processed_records, 
                             user_id, 
@@ -171,9 +197,12 @@ class ProcessingAPIService:
                         if not memory_success:
                             logger.error(f"Memory save failed for {filename}: {memory_message}")
                         
-                        logger.info(f"Successfully processed {len(processed_records)} records from {filename}")
+                        logger.info(f"Successfully processed {len(processed_records)} records from {filename} ({analysis_mode} mode)")
                     else:
-                        failed_files.append(f"{filename} (no data for {selected_period})")
+                        if analysis_mode == 'ytd':
+                            failed_files.append(f"{filename} (no data for YTD {month} {year})")
+                        else:
+                            failed_files.append(f"{filename} (no data for {selected_period})")
                     
                     processed_files += 1
                     
@@ -190,23 +219,30 @@ class ProcessingAPIService:
             dl_records = len([r for r in all_records if 'Employee' in r])
             vc_records = len([r for r in all_records if 'Item' in r])
             
+            # Build results with YTD warnings if any
+            results = {
+                'total_records': len(all_records),
+                'dl_records': dl_records,
+                'vc_records': vc_records,
+                'projects': len(set(r.get('Project', '') for r in all_records)),
+                'successful_files': successful_files,
+                'failed_files': len(failed_files),
+                'error_details': failed_files if failed_files else None
+            }
+            
+            # Add YTD warnings if present
+            if ytd_warnings:
+                results['ytd_warnings'] = ytd_warnings
+            
             # Update job with final results
             self.processing_jobs[job_id].update({
                 'status': 'completed',
                 'progress': 100,
                 'completed_at': datetime.utcnow(),
-                'results': {
-                    'total_records': len(all_records),
-                    'dl_records': dl_records,
-                    'vc_records': vc_records,
-                    'projects': len(set(r.get('Project', '') for r in all_records)),
-                    'successful_files': successful_files,
-                    'failed_files': len(failed_files),
-                    'error_details': failed_files if failed_files else None
-                }
+                'results': results
             })
             
-            logger.info(f"Processing job {job_id} completed: {successful_files}/{total_files} files successful")
+            logger.info(f"Processing job {job_id} completed ({analysis_mode} mode): {successful_files}/{total_files} files successful")
             
         except Exception as e:
             # Update job with error

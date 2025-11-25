@@ -154,8 +154,20 @@ class APIClientService:
             logger.error(f"File upload error: {str(e)}")
             return False, str(e), []
     
-    def start_processing(self, file_ids: List[str], month: str, year: str) -> Tuple[bool, str, Optional[str]]:
-        """Start file processing and return job ID"""
+    def start_processing(self, file_ids: List[str], month: str, year: str, 
+                         analysis_mode: str = "single") -> Tuple[bool, str, Optional[str]]:
+        """
+        Start file processing and return job ID
+        
+        Args:
+            file_ids: List of file IDs to process
+            month: Target month name
+            year: Target year
+            analysis_mode: 'single' for single month, 'ytd' for Year-to-Date
+            
+        Returns:
+            Tuple of (success, message, job_id)
+        """
         try:
             if not self.auth_token:
                 return False, "Authentication required", None
@@ -163,7 +175,8 @@ class APIClientService:
             data = {
                 'file_ids': file_ids,
                 'month': month,
-                'year': year
+                'year': year,
+                'analysis_mode': analysis_mode
             }
             
             response = self.session.post(

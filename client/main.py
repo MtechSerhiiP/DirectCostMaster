@@ -43,6 +43,7 @@ class DirectCostMasterClient:
         self.results_card = None
         self.month_select = None
         self.year_select = None
+        self.analysis_mode_radio = None  # New: analysis mode selector
         
         # Authentication UI components
         self.login_card = None
@@ -303,20 +304,38 @@ class DirectCostMasterClient:
         with ui.card().classes('w-full max-w-2xl mx-auto p-6 shadow-lg mt-6'):
             ui.label('Process Data').classes('text-xl font-semibold mb-4')
             
-            # Month selection
-            ui.label('Select Month to Process:').classes('text-sm font-medium mb-2')
-            self.month_select = ui.select(
-                options=['January', 'February', 'March', 'April', 'May', 'June',
-                        'July', 'August', 'September', 'October', 'November', 'December'],
-                value='July'
+            # Month and Year selection row
+            with ui.row().classes('w-full gap-4 mb-4'):
+                with ui.column().classes('flex-1'):
+                    ui.label('Select Month:').classes('text-sm font-medium mb-2')
+                    self.month_select = ui.select(
+                        options=['January', 'February', 'March', 'April', 'May', 'June',
+                                'July', 'August', 'September', 'October', 'November', 'December'],
+                        value='July'
+                    ).classes('w-full')
+                
+                with ui.column().classes('flex-1'):
+                    ui.label('Select Year:').classes('text-sm font-medium mb-2')
+                    self.year_select = ui.select(
+                        options=['2025', '2024', '2023', '2022', '2021', '2020'],
+                        value='2025'
+                    ).classes('w-full')
+            
+            # Analysis mode selection (radio buttons)
+            ui.label('Analysis Mode:').classes('text-sm font-medium mb-2')
+            self.analysis_mode_radio = ui.radio(
+                options={
+                    'single': 'Single Month - Process only selected month',
+                    'ytd': 'YTD (Year-to-Date) - Process January through selected month'
+                },
+                value='single'
             ).classes('w-full mb-4')
             
-            # Year selection
-            ui.label('Select Year to Process:').classes('text-sm font-medium mb-2')
-            self.year_select = ui.select(
-                options=['2025', '2024', '2023', '2022', '2021', '2020'],
-                value='2025'
-            ).classes('w-full mb-4')
+            # Info about YTD mode
+            with ui.row().classes('w-full mb-4'):
+                ui.icon('info', size='sm').classes('text-blue-500')
+                ui.label('YTD mode will process all months from January to the selected month. ' +
+                        'If some months are missing in a file, a warning will be shown.').classes('text-xs text-gray-500 ml-2')
             
             with ui.row().classes('w-full gap-4'):
                 self.process_button = ui.button(
@@ -332,7 +351,7 @@ class DirectCostMasterClient:
             # Initially disabled until files are uploaded
             self.process_button.set_enabled(False)
             
-            ui.label('This will process all uploaded Excel files for the selected month.').classes('text-sm text-gray-500 mt-2')
+            ui.label('This will process all uploaded Excel files for the selected month/period.').classes('text-sm text-gray-500 mt-2')
     
     def create_results_section(self):
         """Create the results and download section."""
@@ -458,16 +477,28 @@ class DirectCostMasterClient:
         try:
             selected_month = self.month_select.value
             selected_year = self.year_select.value
+            analysis_mode = self.analysis_mode_radio.value  # 'single' or 'ytd'
             file_ids = [f['file_id'] for f in self.uploaded_files]
             
-            ui.notify(f'Starting processing of {len(file_ids)} files for {selected_month} {selected_year}...', type='info')
+            # Create appropriate message based on mode
+            if analysis_mode == 'ytd':
+                mode_text = f'YTD (January - {selected_month}) {selected_year}'
+            else:
+                mode_text = f'{selected_month} {selected_year}'
             
-            # Start processing via API
-            success, message, job_id = api_client.start_processing(file_ids, selected_month, selected_year)
+            ui.notify(f'Starting processing of {len(file_ids)} files for {mode_text}...', type='info')
+            
+            # Start processing via API with analysis mode
+            success, message, job_id = api_client.start_processing(
+                file_ids, 
+                selected_month, 
+                selected_year,
+                analysis_mode
+            )
             
             if success and job_id:
                 self.current_job_id = job_id
-                ui.notify('Processing started. Checking progress...', type='info')
+                ui.notify(f'Processing started ({analysis_mode} mode). Checking progress...', type='info')
                 
                 # Start polling for status
                 await self.poll_processing_status()
@@ -504,6 +535,19 @@ class DirectCostMasterClient:
                     
                     if failed_files > 0:
                         ui.notify(f'Note: {failed_files} files failed to process', type='warning')
+                    
+                    # Show YTD warnings if any
+                    ytd_warnings = results.get('ytd_warnings', [])
+                    if ytd_warnings:
+                        for warning in ytd_warnings:
+                            missing = warning.get('missing_months', [])
+                            filename = warning.get('filename', 'Unknown file')
+                            if missing:
+                                ui.notify(
+                                    f'⚠️ {filename}: Missing months: {", ".join(missing)}',
+                                    type='warning',
+                                    timeout=10000  # Show for 10 seconds
+                                )
                     
                     # Update results display
                     await self.update_results_display()

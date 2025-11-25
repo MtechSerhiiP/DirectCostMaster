@@ -19,12 +19,96 @@ class DirectCostProcessor:
     Handles both DL Costs (Direct) and VC Costs (Direct) tabs.
     """
     
+    # Ordered list of months for YTD calculations
+    MONTHS_ORDER = [
+        'January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'
+    ]
+    
     def __init__(self):
         self.dl_costs_data = None
         self.vc_costs_data = None
         self.project_name = ""
         self.current_month = "June"
         self.processed_data = []
+    
+    def get_ytd_months(self, end_month: str, year: str) -> List[str]:
+        """
+        Get list of months from January to the specified end month (inclusive).
+        
+        Args:
+            end_month: Month name (e.g., 'June')
+            year: Year string (e.g., '2025')
+            
+        Returns:
+            List of month strings in format "Month Year" (e.g., ["January 2025", "February 2025", ...])
+        """
+        try:
+            end_index = self.MONTHS_ORDER.index(end_month)
+            ytd_months = [f"{m} {year}" for m in self.MONTHS_ORDER[:end_index + 1]]
+            return ytd_months
+        except ValueError:
+            logger.error(f"Invalid month name: {end_month}")
+            return [f"{end_month} {year}"]
+    
+    def get_month_index(self, month_name: str) -> int:
+        """
+        Get the 0-based index of a month name.
+        
+        Args:
+            month_name: Month name (e.g., 'June')
+            
+        Returns:
+            Index (0 for January, 11 for December) or -1 if not found
+        """
+        try:
+            return self.MONTHS_ORDER.index(month_name)
+        except ValueError:
+            return -1
+    
+    def get_available_months_in_file(self, df: pd.DataFrame, year: str) -> List[str]:
+        """
+        Scan the DataFrame to find all available month sections.
+        
+        Args:
+            df: DataFrame containing the data
+            year: Year to search for
+            
+        Returns:
+            List of available months in format "Month Year"
+        """
+        available_months = []
+        
+        for month in self.MONTHS_ORDER:
+            target_month = f"{month} {year}"
+            month_header_row, _ = self._find_month_section(df, target_month)
+            if month_header_row is not None:
+                available_months.append(target_month)
+        
+        return available_months
+    
+    def validate_ytd_months(self, df: pd.DataFrame, expected_months: List[str]) -> Tuple[List[str], List[str]]:
+        """
+        Validate which expected months are available in the DataFrame.
+        
+        Args:
+            df: DataFrame to check
+            expected_months: List of expected months in format "Month Year"
+            
+        Returns:
+            Tuple of (available_months, missing_months)
+        """
+        available = []
+        missing = []
+        
+        for month in expected_months:
+            month_header_row, _ = self._find_month_section(df, month)
+            if month_header_row is not None:
+                available.append(month)
+            else:
+                missing.append(month)
+        print(f"Available months: {available}, Missing months: {missing}")
+        return available, missing
     
     def extract_project_name_from_filename(self, filename: str) -> str:
         """
@@ -698,18 +782,18 @@ class DirectCostProcessor:
         if not target_month:
             return None, None
         
-        # Convert target month to different possible formats
+        # Convert target month to different possible formats for matching
         target_variations = []
         
-        # Extract just the month name if year is included
-        # month_name = target_month.split()[0] if ' ' in target_month else target_month
-        # target_variations.append(month_name.lower())
+        # Add the full target (e.g., "june 2025")
         target_variations.append(target_month.lower())
         
-        # Add year variations if not already included
-        # current_year = "2025"  # You can make this dynamic if needed
-        # if current_year not in target_month:
-        #     target_variations.append(f"{month_name.lower()} {current_year}")
+        # Also extract just the month name for matching (e.g., "june")
+        # This handles cases where Excel has "February" without year
+        parts = target_month.split()
+        if len(parts) >= 1:
+            month_name_only = parts[0].lower()
+            target_variations.append(month_name_only)
         
         start_row = None
         end_row = None
@@ -718,11 +802,20 @@ class DirectCostProcessor:
         for index, row in df.iterrows():
             # Check first column for month names
             first_col_value = str(row.iloc[0] if len(row) > 0 else '').strip().lower()
-            print(f"Checking row {index}: {first_col_value}")
             
             # Check if this row contains our target month
             for variation in target_variations:
+                # Use word boundary check to avoid false positives
+                # e.g., "june" should not match "june 2024" when looking for "june 2025"
                 if variation in first_col_value:
+                    # If we're matching just month name, make sure the year matches (if present in cell)
+                    if len(parts) >= 2 and variation == month_name_only:
+                        year = parts[1]
+                        # If the cell has a year, it must match our target year
+                        if any(y in first_col_value for y in ['2020', '2021', '2022', '2023', '2024', '2025', '2026']):
+                            if year not in first_col_value:
+                                continue  # Year mismatch, skip this
+                    
                     if not start_row_found:
                         start_row = index + 1  # Start from the row AFTER the month header
                         logger.info(f"Found month section '{target_month}' starting at row {start_row}")
@@ -839,6 +932,126 @@ class DirectCostProcessor:
         
         logger.info(f"Processed file '{filename}': {len(all_records)} total records for {target_month}")
         return all_records
+    
+    def process_file_for_ytd(self, sheets_data: Dict[str, pd.DataFrame], filename: str, 
+                             end_month: str, year: str) -> Tuple[List[Dict], List[str], List[str]]:
+        """
+        Process a P&L file for YTD (Year-to-Date) - all months from January to end_month.
+        
+        Args:
+            sheets_data: Dictionary of sheet names to DataFrames
+            filename: Original filename for project name extraction
+            end_month: End month name (e.g., 'June')
+            year: Year string (e.g., '2025')
+            
+        Returns:
+            Tuple of (all_records, processed_months, missing_months)
+        """
+        project_name = self.extract_project_name_from_filename(filename)
+        expected_months = self.get_ytd_months(end_month, year)
+        
+        logger.info(f"Processing YTD for '{filename}': January {year} to {end_month} {year}")
+        logger.info(f"Expected months: {expected_months}")
+        
+        all_records = []
+        processed_months = []
+        missing_months_dl = []
+        missing_months_vc = []
+        
+        # Find sheets
+        dl_sheet_name = self._find_sheet_by_pattern(sheets_data.keys(), ['DL costs (direct)', 'DL costs breakdown'])
+        vc_sheet_name = self._find_sheet_by_pattern(sheets_data.keys(), ['VC Costs (Direct)', 'VC Costs', 'Variable Costs'])
+        
+        # Validate available months in DL sheet
+        if dl_sheet_name:
+            dl_df = sheets_data[dl_sheet_name]
+            available_dl, missing_dl = self.validate_ytd_months(dl_df, expected_months)
+            missing_months_dl = missing_dl
+            logger.info(f"DL sheet - Available months: {available_dl}, Missing: {missing_dl}")
+        else:
+            logger.warning("DL Costs (Direct) sheet not found")
+            available_dl = []
+        
+        # Validate available months in VC sheet
+        if vc_sheet_name:
+            vc_df = sheets_data[vc_sheet_name]
+            available_vc, missing_vc = self.validate_ytd_months(vc_df, expected_months)
+            missing_months_vc = missing_vc
+            logger.info(f"VC sheet - Available months: {available_vc}, Missing: {missing_vc}")
+        else:
+            logger.warning("VC Costs (Direct) sheet not found")
+            available_vc = []
+        
+        # Combine missing months - month is truly missing only if absent from BOTH sheets
+        # (or from the only sheet that exists)
+        if dl_sheet_name and vc_sheet_name:
+            # Both sheets exist - month is missing only if absent from BOTH
+            all_missing = list(set(missing_months_dl) & set(missing_months_vc))
+        elif dl_sheet_name:
+            # Only DL sheet exists
+            all_missing = missing_months_dl
+        elif vc_sheet_name:
+            # Only VC sheet exists
+            all_missing = missing_months_vc
+        else:
+            # No sheets found
+            all_missing = expected_months
+        
+        # Sort missing months chronologically
+        all_missing.sort(key=lambda m: self.get_month_index(m.split()[0]) if m.split() else 0)
+        
+        # Process each available month
+        for target_month in expected_months:
+            month_has_data = False
+            
+            # Process DL for this month
+            if dl_sheet_name and target_month in available_dl:
+                dl_records = self.process_dl_costs_direct(sheets_data[dl_sheet_name], project_name, target_month)
+                if dl_records:
+                    all_records.extend(dl_records)
+                    month_has_data = True
+                    logger.info(f"Processed {len(dl_records)} DL records for {target_month}")
+            
+            # Process VC for this month
+            if vc_sheet_name and target_month in available_vc:
+                vc_records = self.process_vc_costs_direct(sheets_data[vc_sheet_name], project_name, target_month)
+                if vc_records:
+                    all_records.extend(vc_records)
+                    month_has_data = True
+                    logger.info(f"Processed {len(vc_records)} VC records for {target_month}")
+            
+            if month_has_data:
+                processed_months.append(target_month)
+        
+        # Sort all records chronologically by month
+        all_records = self._sort_records_by_month(all_records)
+        
+        logger.info(f"YTD processing complete for '{filename}': {len(all_records)} total records, "
+                   f"{len(processed_months)} months processed, {len(all_missing)} months missing")
+        
+        return all_records, processed_months, all_missing
+    
+    def _sort_records_by_month(self, records: List[Dict]) -> List[Dict]:
+        """
+        Sort records chronologically by their Month field.
+        
+        Args:
+            records: List of record dictionaries with 'Month' field
+            
+        Returns:
+            Sorted list of records
+        """
+        def get_month_sort_key(record):
+            month_str = record.get('Month', '')
+            parts = month_str.split()
+            if len(parts) >= 2:
+                month_name = parts[0]
+                year = parts[1]
+                month_idx = self.get_month_index(month_name)
+                return (int(year) if year.isdigit() else 0, month_idx)
+            return (0, 0)
+        
+        return sorted(records, key=get_month_sort_key)
     
     def _find_sheet_by_pattern(self, sheet_names: List[str], patterns: List[str]) -> Optional[str]:
         """

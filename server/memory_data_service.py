@@ -108,12 +108,15 @@ class MemoryDataService:
                 user_data.projects.add(project_name)
                 
                 # Determine record type based on presence of 'Employee' vs 'Item'
+                # Use record-specific month if available (important for YTD processing)
+                record_period = record.get('Month') or period
+
                 if 'Employee' in record:
                     # Create DL record
                     dl_record = DLRecord(
                         id=str(uuid.uuid4()),
                         project=project_name,
-                        period=period,
+                        period=record_period,
                         employee=record.get('Employee', ''),
                         ticket=record.get('Ticket', ''),
                         bucket=record.get('Bucket', ''),
@@ -131,7 +134,7 @@ class MemoryDataService:
                     vc_record = VCRecord(
                         id=str(uuid.uuid4()),
                         project=project_name,
-                        period=period,
+                        period=record_period,
                         item=record.get('Item', ''),
                         bucket=record.get('Bucket', ''),
                         total_dl_costs=record.get('Total DL costs', 0),  # Note: despite name, this is VC costs
