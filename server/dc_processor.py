@@ -275,7 +275,7 @@ class DirectCostProcessor:
                 if sick_leave_val < 0 or sick_hours_val < 0:
                     record = base_record_info.copy()
                     record.update({
-                        'Bucket': 'Discrepancies & corrections from previous month',
+                        'Bucket': 'Corrected Sick Leave',
                         'DC Hours': sick_hours_val,
                         'Total DL costs': round(sick_leave_val, 2)
                     })
@@ -771,67 +771,49 @@ class DirectCostProcessor:
     def _find_month_section(self, df: pd.DataFrame, target_month: str) -> Tuple[Optional[int], Optional[int]]:
         """
         Find the start and end row indices for a specific month section in the DataFrame.
-        
-        Args:
-            df: DataFrame containing the monthly data
-            target_month: Month to find (e.g., 'June', 'June 2025')
-            
-        Returns:
-            Tuple of (start_row, end_row) indices, or (None, None) if not found
+        Month headers must match the full "Month Year" string exactly. Rows that contain only
+        the month name without a year are ignored.
         """
         if not target_month:
             return None, None
-        
-        # Convert target month to different possible formats for matching
-        target_variations = []
-        
-        # Add the full target (e.g., "june 2025")
-        target_variations.append(target_month.lower())
-        
-        # Also extract just the month name for matching (e.g., "june")
-        # This handles cases where Excel has "February" without year
-        parts = target_month.split()
-        if len(parts) >= 1:
-            month_name_only = parts[0].lower()
-            target_variations.append(month_name_only)
-        
-        start_row = None
-        end_row = None
-        start_row_found = False
-        # Search through the DataFrame for month headers
+
+        target_parts = target_month.strip().split()
+        if len(target_parts) < 2:
+            logger.warning(f"Target month '{target_month}' is missing year information; skipping lookup.")
+            return None, None
+
+        normalized_target = ' '.join(part.lower() for part in target_parts)
+        start_row: Optional[int] = None
+        end_row: Optional[int] = None
+
         for index, row in df.iterrows():
-            # Check first column for month names
-            first_col_value = str(row.iloc[0] if len(row) > 0 else '').strip().lower()
-            
-            # Check if this row contains our target month
-            for variation in target_variations:
-                # Use word boundary check to avoid false positives
-                # e.g., "june" should not match "june 2024" when looking for "june 2025"
-                if variation in first_col_value:
-                    # If we're matching just month name, make sure the year matches (if present in cell)
-                    if len(parts) >= 2 and variation == month_name_only:
-                        year = parts[1]
-                        # If the cell has a year, it must match our target year
-                        if any(y in first_col_value for y in ['2020', '2021', '2022', '2023', '2024', '2025', '2026']):
-                            if year not in first_col_value:
-                                continue  # Year mismatch, skip this
-                    
-                    if not start_row_found:
-                        start_row = index + 1  # Start from the row AFTER the month header
-                        logger.info(f"Found month section '{target_month}' starting at row {start_row}")
-                        start_row_found = True
-                    break
-        
-        # If we found a start but no end, process until the end of the data
-        if start_row is not None:
-            # Look for a TOTAL row to end the section
-            for index in range(start_row, len(df)):
-                first_col_value = str(df.iloc[index, 0] if len(df.iloc[index]) > 0 else '').strip().lower()
-                if 'total' in first_col_value:
-                    logger.debug(f"Found TOTAL row at index {index}, ending month section")
-                    end_row = index
-                    start_row_found = False
-                    break
+            first_col_raw = str(row.iloc[0] if len(row) > 0 else '').strip()
+            if not first_col_raw:
+                continue
+
+            if len(first_col_raw.split()) < 2:
+                # Skip rows that only contain the month name
+                logger.debug(f"Skipping month header candidate without year: '{first_col_raw}'")
+                continue
+
+            normalized_cell = ' '.join(first_col_raw.lower().split())
+            if normalized_cell == normalized_target:
+                start_row = index + 1  # data starts after header row
+                logger.info(f"Found month section '{target_month}' starting at row {start_row}")
+                break
+
+        if start_row is None:
+            return None, None
+
+        for index in range(start_row, len(df)):
+            first_col_value = str(df.iloc[index, 0] if len(df.iloc[index]) > 0 else '').strip().lower()
+            if 'total' in first_col_value:
+                logger.debug(f"Found TOTAL row at index {index}, ending month section")
+                end_row = index
+                break
+
+        if end_row is None:
+            end_row = len(df)
 
         return start_row, end_row
 
