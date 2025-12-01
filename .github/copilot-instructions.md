@@ -22,12 +22,12 @@ Direct Cost Master is a modern Client-Server web application for processing Exce
 #### **Server Components** (`/server/`)
 - `main.py`: FastAPI application with all REST endpoints
 - `auth_service.py`: JWT-based authentication (stateless)
+- `auth_models.py`: User model and authentication database config
 - `processing_service.py`: Async file processing and job management
 - `data_service.py`: Data retrieval, pagination, and export generation
+- `memory_data_service.py`: In-memory storage for DL/VC records
 - `schemas.py`: Pydantic models for API request/response validation
 - `dc_processor.py`: Core business logic for DL/VC cost categorization
-- `models.py`: SQLAlchemy schema with user isolation patterns
-- `database_service.py`: Data persistence and retrieval operations
 
 #### **Client Components**
 - `main.py`: NiceGUI UI making HTTP requests to server API

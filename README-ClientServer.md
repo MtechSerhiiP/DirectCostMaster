@@ -132,17 +132,17 @@ DirectCostMaster/
 ├── server/                    # FastAPI server
 │   ├── main.py               # API endpoints
 │   ├── auth_service.py       # JWT authentication
+│   ├── auth_models.py        # User model and DB config
 │   ├── processing_service.py # File processing
 │   ├── data_service.py       # Data operations
+│   ├── memory_data_service.py # In-memory storage
+│   ├── dc_processor.py       # Business logic
 │   ├── schemas.py            # API models
 │   └── requirements.txt      # Server dependencies
 ├── client/                   # NiceGUI client
 │   ├── main.py              # Client application
 │   ├── api_client.py        # API communication layer
 │   └── requirements.txt     # Client dependencies
-├── dc_processor.py           # Business logic (used by server)
-├── database_service.py       # Database operations
-├── models.py                 # SQLAlchemy models
 ├── start_server.bat          # Server startup script
 ├── start_client.bat          # Client startup script
 └── README-ClientServer.md    # This file

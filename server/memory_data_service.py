@@ -6,7 +6,6 @@ Replaces database storage for DL/VC records while keeping authentication in DB
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 import pandas as pd
-import io
 import uuid
 import logging
 from dataclasses import dataclass, field
@@ -45,26 +44,11 @@ class VCRecord:
 
 
 @dataclass
-class ProcessingLog:
-    """Processing log record in memory"""
-    id: str
-    user_id: int
-    filename: str
-    period: str
-    status: str  # 'success', 'failed', 'partial'
-    records_processed: int
-    error_message: Optional[str]
-    processing_time_seconds: Optional[float]
-    created_at: datetime
-
-
-@dataclass
 class InMemoryUserData:
     """Container for all user data in memory"""
     user_id: int
     dl_records: List[DLRecord] = field(default_factory=list)
     vc_records: List[VCRecord] = field(default_factory=list)
-    processing_logs: List[ProcessingLog] = field(default_factory=list)
     projects: set = field(default_factory=set)  # Set of unique project names
 
 
@@ -95,7 +79,6 @@ class MemoryDataService:
         Returns:
             Tuple of (success, message, dl_count, vc_count)
         """
-        start_time = datetime.utcnow()
         dl_count = 0
         vc_count = 0
 
@@ -145,45 +128,11 @@ class MemoryDataService:
                     user_data.vc_records.append(vc_record)
                     vc_count += 1
 
-            # Create processing log
-            processing_time = (datetime.utcnow() - start_time).total_seconds()
-            log_entry = ProcessingLog(
-                id=str(uuid.uuid4()),
-                user_id=user_id,
-                filename=filename,
-                period=period,
-                status='success',
-                records_processed=dl_count + vc_count,
-                error_message=None,
-                processing_time_seconds=processing_time,
-                created_at=datetime.utcnow()
-            )
-            user_data.processing_logs.append(log_entry)
-
             message = f"Successfully saved {dl_count} DL records and {vc_count} VC records in memory"
             logger.info(f"Data saved to memory: {message}")
             return True, message, dl_count, vc_count
 
         except Exception as e:
-            # Create error log
-            processing_time = (datetime.utcnow() - start_time).total_seconds()
-            try:
-                user_data = self._get_user_data(user_id)
-                log_entry = ProcessingLog(
-                    id=str(uuid.uuid4()),
-                    user_id=user_id,
-                    filename=filename,
-                    period=period,
-                    status='failed',
-                    records_processed=0,
-                    error_message=str(e),
-                    processing_time_seconds=processing_time,
-                    created_at=datetime.utcnow()
-                )
-                user_data.processing_logs.append(log_entry)
-            except:
-                pass
-
             logger.error(f"Error saving data to memory: {str(e)}")
             return False, f"Failed to save data: {str(e)}", 0, 0
     
@@ -301,43 +250,6 @@ class MemoryDataService:
             logger.error(f"Error retrieving user projects from memory: {str(e)}")
             return []
     
-    def get_processing_history(self, user_id: int, limit: int = 50) -> List[Dict]:
-        """
-        Get user's processing history
-        
-        Args:
-            user_id: User ID
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of processing log dictionaries
-        """
-        try:
-            user_data = self._get_user_data(user_id)
-            
-            # Sort by creation date (newest first) and apply limit
-            sorted_logs = sorted(user_data.processing_logs, 
-                               key=lambda x: x.created_at, reverse=True)[:limit]
-            
-            history = []
-            for log in sorted_logs:
-                history.append({
-                    'id': log.id,
-                    'filename': log.filename,
-                    'period': log.period,
-                    'status': log.status,
-                    'records_processed': log.records_processed,
-                    'error_message': log.error_message,
-                    'processing_time_seconds': log.processing_time_seconds,
-                    'created_at': log.created_at
-                })
-            
-            return history
-            
-        except Exception as e:
-            logger.error(f"Error retrieving processing history from memory: {str(e)}")
-            return []
-    
     def clear_user_data(self, user_id: int, period: str = None, project_name: str = None) -> Tuple[bool, str]:
         """
         Clear user's data (with optional filters)
@@ -401,156 +313,6 @@ class MemoryDataService:
         except Exception as e:
             logger.error(f"Error clearing user data from memory: {str(e)}")
             return False, f"Failed to clear data: {str(e)}"
-    
-    def export_user_data_to_excel(self, user_id: int, period: str = None, 
-                                  project_name: str = None) -> Optional[bytes]:
-        """
-        Export user's data to Excel format
-        
-        Args:
-            user_id: User ID
-            period: Optional period filter
-            project_name: Optional project name filter
-            
-        Returns:
-            Excel file as bytes or None if failed
-        """
-        try:
-            dl_df, vc_df = self.get_user_data(user_id, period, project_name)
-            
-            if dl_df.empty and vc_df.empty:
-                return None
-            
-            # Create Excel file in memory
-            output = io.BytesIO()
-            
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                if not dl_df.empty:
-                    dl_df.to_excel(writer, sheet_name='DL Costs', index=False)
-                if not vc_df.empty:
-                    vc_df.to_excel(writer, sheet_name='VC Costs', index=False)
-            
-            output.seek(0)
-            return output.read()
-            
-        except Exception as e:
-            logger.error(f"Error exporting user data to Excel from memory: {str(e)}")
-            return None
-    
-    def get_user_statistics(self, user_id: int) -> Dict[str, Any]:
-        """
-        Get comprehensive statistics about user's data
-        
-        Args:
-            user_id: User ID
-            
-        Returns:
-            Dictionary with statistics
-        """
-        try:
-            user_data = self._get_user_data(user_id)
-            
-            # Basic counts
-            total_dl = len(user_data.dl_records)
-            total_vc = len(user_data.vc_records)
-            total_records = total_dl + total_vc
-            
-            # Unique periods
-            periods = set()
-            for record in user_data.dl_records + user_data.vc_records:
-                periods.add(record.period)
-            
-            # Cost totals
-            total_dl_costs = sum(r.total_dl_costs for r in user_data.dl_records)
-            total_vc_costs = sum(r.total_dl_costs for r in user_data.vc_records)
-            
-            # Bucket distribution
-            dl_buckets = {}
-            for record in user_data.dl_records:
-                dl_buckets[record.bucket] = dl_buckets.get(record.bucket, 0) + 1
-                
-            vc_buckets = {}
-            for record in user_data.vc_records:
-                vc_buckets[record.bucket] = vc_buckets.get(record.bucket, 0) + 1
-            
-            return {
-                'total_records': total_records,
-                'dl_records': total_dl,
-                'vc_records': total_vc,
-                'unique_projects': len(user_data.projects),
-                'unique_periods': len(periods),
-                'total_dl_costs': round(total_dl_costs, 2),
-                'total_vc_costs': round(total_vc_costs, 2),
-                'periods': sorted(list(periods)),
-                'projects': sorted(list(user_data.projects)),
-                'dl_bucket_distribution': dl_buckets,
-                'vc_bucket_distribution': vc_buckets
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting user statistics from memory: {str(e)}")
-            return {
-                'total_records': 0,
-                'dl_records': 0,
-                'vc_records': 0,
-                'unique_projects': 0,
-                'unique_periods': 0,
-                'total_dl_costs': 0.0,
-                'total_vc_costs': 0.0,
-                'periods': [],
-                'projects': [],
-                'dl_bucket_distribution': {},
-                'vc_bucket_distribution': {}
-            }
-    
-    def clear_all_user_data(self, user_id: int) -> bool:
-        """
-        Clear all data for a user
-        
-        Args:
-            user_id: User ID
-            
-        Returns:
-            Success status
-        """
-        try:
-            if user_id in self.user_data:
-                del self.user_data[user_id]
-                logger.info(f"Cleared all data for user {user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error clearing all user data: {str(e)}")
-            return False
-    
-    def get_memory_usage_stats(self) -> Dict[str, Any]:
-        """
-        Get statistics about memory usage
-        
-        Returns:
-            Dictionary with memory usage statistics
-        """
-        try:
-            total_users = len(self.user_data)
-            total_dl_records = 0
-            total_vc_records = 0
-            total_projects = set()
-            
-            for user_data in self.user_data.values():
-                total_dl_records += len(user_data.dl_records)
-                total_vc_records += len(user_data.vc_records)
-                total_projects.update(user_data.projects)
-            
-            return {
-                'total_users': total_users,
-                'total_dl_records': total_dl_records,
-                'total_vc_records': total_vc_records,
-                'total_records': total_dl_records + total_vc_records,
-                'unique_projects': len(total_projects),
-                'average_records_per_user': (total_dl_records + total_vc_records) / max(total_users, 1)
-            }
-        except Exception as e:
-            logger.error(f"Error getting memory usage stats: {str(e)}")
-            return {}
 
 
 # Global memory data service instance

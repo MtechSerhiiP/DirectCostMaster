@@ -3,14 +3,12 @@ Authentication-only database models for Direct Cost Master application
 Only handles user authentication and sessions
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func
-from datetime import datetime
 import bcrypt
 import os
-from typing import Optional
 
 Base = declarative_base()
 
@@ -29,9 +27,6 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True)
     
-    # Relationships
-    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
-    
     def set_password(self, password: str):
         """Hash and set password"""
         password_bytes = password.encode('utf-8')
@@ -46,26 +41,6 @@ class User(Base):
     
     def __repr__(self):
         return f"<User(username='{self.username}', email='{self.email}')>"
-
-
-class UserSession(Base):
-    """User session model for session management"""
-    __tablename__ = 'user_sessions'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    session_token = Column(String(255), unique=True, nullable=False, index=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    is_active = Column(Boolean, default=True)
-    ip_address = Column(String(45), nullable=True)  # Support both IPv4 and IPv6
-    user_agent = Column(Text, nullable=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="sessions")
-    
-    def __repr__(self):
-        return f"<UserSession(user_id={self.user_id}, token='{self.session_token[:10]}...', active={self.is_active})>"
 
 
 # Database configuration and utilities

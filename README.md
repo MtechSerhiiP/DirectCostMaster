@@ -167,16 +167,22 @@ LOG_LEVEL=INFO
 
 ```
 DirectCostMaster/
-├── main.py                    # Main application with NiceGUI interface
-├── dc_processor.py            # Business logic for data processing
-├── models.py                  # SQLAlchemy database models
-├── auth.py                   # Authentication and session management
-├── database_service.py       # Database operations service
-├── init_db.py               # Database initialization script
+├── server/                   # FastAPI backend
+│   ├── main.py               # API endpoints
+│   ├── auth_service.py       # JWT authentication
+│   ├── auth_models.py        # User model and DB config
+│   ├── processing_service.py # File processing
+│   ├── data_service.py       # Data operations
+│   ├── memory_data_service.py # In-memory DL/VC storage
+│   ├── dc_processor.py       # Business logic
+│   ├── schemas.py            # API models
+│   └── requirements.txt      # Server dependencies
+├── client/                   # NiceGUI frontend
+│   ├── main.py              # Client application
+│   └── requirements.txt     # Client dependencies
 ├── requirements.txt         # Python dependencies
 ├── .env.example            # Environment variables template
 ├── .env                    # Environment variables (create from example)
-├── process_description.txt # Original business requirements
 └── README.md              # This file
 ```
 
@@ -191,16 +197,19 @@ DirectCostMaster/
 ## API Services
 
 ### AuthService
-- User registration and authentication
-- Session creation and validation
-- Password hashing and verification
-- Session cleanup and logout
+- JWT-based authentication
+- Token generation and validation
+- User management
 
-### DatabaseService
+### MemoryDataService
+- In-memory DL/VC record storage
 - Project management
-- Data persistence and retrieval
-- Processing history tracking
-- Excel export functionality
+- Data retrieval and filtering
+
+### DataAPIService
+- Data export to Excel
+- Pagination and filtering
+- Download management
 
 ## Error Handling
 
@@ -221,10 +230,10 @@ Comprehensive error handling and user feedback:
 ## Development
 
 ### Adding New Features
-1. Database changes: Update `models.py` and run migrations
+1. Auth changes: Update `auth_models.py`
 2. Business logic: Modify `dc_processor.py`
-3. UI changes: Update `main.py`
-4. Database operations: Extend `database_service.py`
+3. Data storage: Extend `memory_data_service.py`
+4. API endpoints: Update `server/main.py`
 
 ### Testing
 1. Use test database for development
