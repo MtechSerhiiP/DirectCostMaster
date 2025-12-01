@@ -948,11 +948,7 @@ class DirectCostMasterClient:
                 self.create_process_section()
                 self.create_results_section()
     
-<<<<<<< HEAD
-    def run(self, host: str = '127.0.0.1', port: int = 8080):
-=======
     def run(self, host: str = '0.0.0.0', port: int = 8080):
->>>>>>> 25e7f39 (Made docker-compose up start all application)
         """Run the client application"""
         # Check server availability on startup
         if not api_client.check_server_health():

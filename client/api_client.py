@@ -22,12 +22,8 @@ class APIClientService:
     
     def __init__(self):
         # API configuration
-<<<<<<< HEAD
-        self.api_host = os.getenv('API_HOST', '127.0.0.1')
-=======
         # Default to 'server' for Docker, '127.0.0.1' for local dev
         self.api_host = os.getenv('API_HOST', 'server')
->>>>>>> 25e7f39 (Made docker-compose up start all application)
         self.api_port = os.getenv('API_PORT', '8000')
         self.base_url = f"http://{self.api_host}:{self.api_port}"
         
