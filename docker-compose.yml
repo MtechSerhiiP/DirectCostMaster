@@ -5,8 +5,20 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+<<<<<<< HEAD
     ports:
       - "8000:8000"
+=======
+    command: python main.py
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+>>>>>>> 25e7f39 (Made docker-compose up start all application)
     volumes:
       - ./server/temp_files:/app/temp_files
       - ./server/temp_exports:/app/temp_exports
@@ -14,12 +26,28 @@ services:
     networks:
       - app-network
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 25e7f39 (Made docker-compose up start all application)
   client:
     build:
       context: .
       dockerfile: client/Dockerfile
+<<<<<<< HEAD
     ports:
       - "8080:8080"
+=======
+    command: python main.py
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - API_HOST=${API_HOST}
+      - API_PORT=${API_PORT}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+>>>>>>> 25e7f39 (Made docker-compose up start all application)
     depends_on:
       - server
     networks:
@@ -27,4 +55,8 @@ services:
 
 networks:
   app-network:
+<<<<<<< HEAD
     driver: bridge
+=======
+    driver: bridge
+>>>>>>> 25e7f39 (Made docker-compose up start all application)

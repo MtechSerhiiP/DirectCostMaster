@@ -429,8 +429,13 @@ async def get_user_projects(current_user: dict = Depends(get_current_user)):
 
 
 if __name__ == "__main__":
+<<<<<<< HEAD
     # Configuration
     host = os.getenv("API_HOST", "127.0.0.1")
+=======
+    # Configuration - bind to 0.0.0.0 for Docker, can override via env
+    host = os.getenv("API_HOST", "0.0.0.0")
+>>>>>>> 25e7f39 (Made docker-compose up start all application)
     port = int(os.getenv("API_PORT", "8000"))
     
     # Run server

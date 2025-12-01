@@ -1,7 +1,43 @@
 files/
-*.pyc
-__pycache__/
-*.pyc
-.env
 *.xlsx
 *.txt
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+
+# Editor files and IDE-specific files
+.idea/  # PyCharm
+.vscode/ # VS Code
+*.sublime-project
+*.sublime-workspace
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.*
+secrets.yaml
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+

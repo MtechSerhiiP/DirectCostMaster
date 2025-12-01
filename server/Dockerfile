@@ -7,6 +7,10 @@ WORKDIR /app
 # Copy the requirements file and install dependencies
 COPY ./server/requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
+<<<<<<< HEAD
+=======
+RUN apt-get update && apt-get install -y curl
+>>>>>>> 25e7f39 (Made docker-compose up start all application)
 
 # Copy the rest of the server application code
 COPY ./server /app/
