@@ -44,6 +44,8 @@ class DirectCostMasterClient:
         self.month_select = None
         self.year_select = None
         self.analysis_mode_radio = None  # New: analysis mode selector
+        # Comparison mode is now selected via radio (no separate checkbox)
+        self.enable_prev_month_comparison = False
         
         # Authentication UI components
         self.login_card = None
@@ -68,6 +70,7 @@ class DirectCostMasterClient:
         # Processing state
         self.current_job_id = None
         self.processing_timer = None
+        
         
         # Main content container
         self.main_content = None
@@ -313,46 +316,50 @@ class DirectCostMasterClient:
                                 'July', 'August', 'September', 'October', 'November', 'December'],
                         value='July'
                     ).classes('w-full')
-                
+
                 with ui.column().classes('flex-1'):
                     ui.label('Select Year:').classes('text-sm font-medium mb-2')
                     self.year_select = ui.select(
                         options=['2025', '2024', '2023', '2022', '2021', '2020'],
                         value='2025'
                     ).classes('w-full')
-            
-            # Analysis mode selection (radio buttons)
+
+            # Analysis mode selection (radio buttons) including previous-month comparison
             ui.label('Analysis Mode:').classes('text-sm font-medium mb-2')
             self.analysis_mode_radio = ui.radio(
                 options={
                     'single': 'Single Month - Process only selected month',
-                    'ytd': 'YTD (Year-to-Date) - Process January through selected month'
+                    'ytd': 'YTD (Year-to-Date) - Process January through selected month',
+                    'prev_month': 'Compare with previous month (two-file mode)'
                 },
                 value='single'
             ).classes('w-full mb-4')
-            
+
             # Info about YTD mode
             with ui.row().classes('w-full mb-4'):
                 ui.icon('info', size='sm').classes('text-blue-500')
-                ui.label('YTD mode will process all months from January to the selected month. ' +
-                        'If some months are missing in a file, a warning will be shown.').classes('text-xs text-gray-500 ml-2')
-            
+                ui.label(
+                    'YTD mode will process all months from January to the selected month. '
+                    'If some months are missing in a file, a warning will be shown.'
+                ).classes('text-xs text-gray-500 ml-2')
+
             with ui.row().classes('w-full gap-4'):
                 self.process_button = ui.button(
                     'Process All P&L Files',
                     on_click=self.process_all_files
                 ).classes('flex-1 bg-blue-500 hover:bg-blue-600 text-white font-semibold py-3 rounded-lg disabled:opacity-50')
-                
+
                 clear_button = ui.button(
                     'Clear All Data',
                     on_click=self.clear_master_data
                 ).classes('bg-red-500 hover:bg-red-600 text-white font-semibold py-3 px-6 rounded-lg')
-            
-            # Initially disabled until files are uploaded
+
             self.process_button.set_enabled(False)
-            
-            ui.label('This will process all uploaded Excel files for the selected month/period.').classes('text-sm text-gray-500 mt-2')
-    
+
+            ui.label(
+                'This will process all uploaded Excel files for the selected month/period.'
+            ).classes('text-sm text-gray-500 mt-2')
+
     def create_results_section(self):
         """Create the results and download section."""
         self.results_card = ui.card().classes('w-full max-w-6xl mx-auto p-6 shadow-lg mt-6 hidden')
@@ -405,9 +412,10 @@ class DirectCostMasterClient:
                 ui.notify('Maximum 20 files allowed. Please clear existing files first.', type='warning')
                 return
             
-            # Read file content
-            file_content = event.content.read()
-            filename = event.name
+            # NiceGUI SmallFileUpload: read() is async, returns bytes
+            file_obj = event.file
+            filename = file_obj.name
+            file_content = await file_obj.read()
             
             # Check if file already uploaded
             if any(f['filename'] == filename for f in self.uploaded_files):
@@ -465,7 +473,9 @@ class DirectCostMasterClient:
         ui.notify('All files cleared.', type='info')
     
     async def process_all_files(self):
-        """Process all uploaded files via API"""
+        """Process files: default analysis OR previous-month comparison."""
+        
+        # --- Basic validation ---
         if not self.uploaded_files:
             ui.notify('No files to process. Please upload files first.', type='warning')
             return
@@ -473,41 +483,74 @@ class DirectCostMasterClient:
         if not self.is_authenticated:
             ui.notify('Please login first', type='warning')
             return
-        
+
         try:
+            file_ids = [f['file_id'] for f in self.uploaded_files]
             selected_month = self.month_select.value
             selected_year = self.year_select.value
-            analysis_mode = self.analysis_mode_radio.value  # 'single' or 'ytd'
-            file_ids = [f['file_id'] for f in self.uploaded_files]
-            
-            # Create appropriate message based on mode
+            analysis_mode = self.analysis_mode_radio.value  # 'single', 'ytd', 'prev_month'
+            #  NEW FEATURE: PREVIOUS MONTH COMPARISON (radio option)
+            if analysis_mode == 'prev_month':
+
+                # Strict validation: need exactly 2 files
+                if len(file_ids) != 2:
+                    ui.notify(
+                        'Previous month comparison requires exactly 2 Excel files:\n'
+                        '• current month\n'
+                        '• previous month',
+                        type='warning',
+                    )
+                    return
+
+                ui.notify(
+                    'Starting previous-month comparison for 2 files...',
+                    type='info'
+                )
+
+                # Start job via new API route
+                success, message, job_id = api_client.start_previous_month_comparison(file_ids)
+
+                if not success or not job_id:
+                    ui.notify(f'Failed to start comparison: {message}', type='negative')
+                    return
+
+                self.current_job_id = job_id
+                await self.poll_processing_status()
+                return  # stop here, do NOT run default logic
+
+            #  (Single Month / YTD)
+
             if analysis_mode == 'ytd':
-                mode_text = f'YTD (January - {selected_month}) {selected_year}'
+                mode_text = f"YTD (January - {selected_month}) {selected_year}"
             else:
-                mode_text = f'{selected_month} {selected_year}'
-            
-            ui.notify(f'Starting processing of {len(file_ids)} files for {mode_text}...', type='info')
-            
-            # Start processing via API with analysis mode
+                mode_text = f"{selected_month} {selected_year}"
+
+            ui.notify(
+                f'Starting processing of {len(file_ids)} files for {mode_text}...',
+                type='info'
+            )
+
             success, message, job_id = api_client.start_processing(
-                file_ids, 
-                selected_month, 
+                file_ids,
+                selected_month,
                 selected_year,
                 analysis_mode
             )
-            
+
             if success and job_id:
                 self.current_job_id = job_id
-                ui.notify(f'Processing started ({analysis_mode} mode). Checking progress...', type='info')
-                
-                # Start polling for status
+                ui.notify(
+                    f'Processing started ({analysis_mode} mode). Checking progress...',
+                    type='info'
+                )
                 await self.poll_processing_status()
             else:
                 ui.notify(f'Failed to start processing: {message}', type='negative')
-                
+
         except Exception as e:
             logger.error(f"Error starting processing: {str(e)}")
             ui.notify(f'Error starting processing: {str(e)}', type='negative')
+
     
     async def poll_processing_status(self):
         """Poll processing status until completion"""
@@ -530,27 +573,65 @@ class DirectCostMasterClient:
                     total_records = results.get('total_records', 0)
                     successful_files = results.get('successful_files', 0)
                     failed_files = results.get('failed_files', 0)
+                    total_mismatches = results.get('total_mismatches')
                     
-                    ui.notify(f'Processing completed! {total_records} records from {successful_files} files', type='positive')
-                    
-                    if failed_files > 0:
-                        ui.notify(f'Note: {failed_files} files failed to process', type='warning')
-                    
-                    # Show YTD warnings if any
-                    ytd_warnings = results.get('ytd_warnings', [])
-                    if ytd_warnings:
-                        for warning in ytd_warnings:
-                            missing = warning.get('missing_months', [])
-                            filename = warning.get('filename', 'Unknown file')
-                            if missing:
-                                ui.notify(
-                                    f'⚠️ {filename}: Missing months: {", ".join(missing)}',
-                                    type='warning',
-                                    timeout=10000  # Show for 10 seconds
-                                )
-                    
-                    # Update results display
-                    await self.update_results_display()
+                    # Check if this is a comparison job (has total_mismatches)
+                    if total_mismatches is not None:
+                        # Comparison job
+                        current_file = results.get('current_file', 'Unknown')
+                        previous_file = results.get('previous_file', 'Unknown')
+                        ui.notify(
+                            f'Comparison completed! Found {total_mismatches} cell mismatches between {current_file} and {previous_file}',
+                            type='positive'
+                        )
+                        
+                        # Show download button for comparison report
+                        download_url = results.get('download_url', '')
+                        if download_url:
+                            
+                            async def download_comparison():
+                                # Wait a moment for the file to be fully stored on server
+                                await asyncio.sleep(0.5)
+                                
+                                # Retry logic in case of timing issues
+                                max_retries = 3
+                                for attempt in range(max_retries):
+                                    dl_success, file_content, filename = api_client.download_comparison_report(self.current_job_id)
+                                    if dl_success:
+                                        ui.download(file_content, filename)
+                                        ui.notify('Comparison report downloaded successfully!', type='positive')
+                                        return
+                                    elif attempt < max_retries - 1:
+                                        # Retry after delay
+                                        await asyncio.sleep(0.5)
+                                
+                                # All retries failed
+                                ui.notify('Failed to download comparison report after multiple attempts', type='negative')
+                            
+                            ui.notify('📥 Downloading comparison report...', type='info')
+                            await download_comparison()
+                    else:
+                        # Regular processing job
+                        ui.notify(f'Processing completed! {total_records} records from {successful_files} files', type='positive')
+                        
+                        if failed_files > 0:
+                            ui.notify(f'Note: {failed_files} files failed to process', type='warning')
+                        
+                        # Show YTD warnings if any
+                        ytd_warnings = results.get('ytd_warnings', [])
+                        if ytd_warnings:
+                            for warning in ytd_warnings:
+                                missing = warning.get('missing_months', [])
+                                filename = warning.get('filename', 'Unknown file')
+                                if missing:
+                                    ui.notify(
+                                        f'⚠️ {filename}: Missing months: {", ".join(missing)}',
+                                        type='warning',
+                                        timeout=10000  # Show for 10 seconds
+                                    )
+                        
+                        # Update results display
+                        await self.update_results_display()
                     break
                     
                 elif status == 'failed':

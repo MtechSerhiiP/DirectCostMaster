@@ -365,6 +365,33 @@ class APIClientService:
             logger.error(f"Download error: {str(e)}")
             return False, b"", "error.txt"
     
+    def download_comparison_report(self, job_id: str) -> Tuple[bool, bytes, str]:
+        """Download comparison report by job ID"""
+        try:
+            if not self.auth_token:
+                return False, b"", "error.txt"
+            
+            response = self.session.get(
+                f"{self.base_url}/api/v1/files/compare-previous/{job_id}/download",
+                headers={'Authorization': f'Bearer {self.auth_token}'}
+            )
+            
+            if response.status_code == 200:
+                # Extract filename from Content-Disposition header
+                content_disposition = response.headers.get('Content-Disposition', '')
+                filename = f'CellComparison_{job_id}.xlsx'
+                if 'filename=' in content_disposition:
+                    filename = content_disposition.split('filename=')[1].strip('"')
+                
+                return True, response.content, filename
+            else:
+                logger.error(f"Download failed: HTTP {response.status_code}")
+                return False, b"", "error.txt"
+                
+        except Exception as e:
+            logger.error(f"Comparison download error: {str(e)}")
+            return False, b"", "error.txt"
+    
     # Utility methods
     def clear_data(self, period: str = None, project: str = None) -> Tuple[bool, str]:
         """Clear user data"""
@@ -452,6 +479,30 @@ class APIClientService:
     def get_current_user(self) -> Optional[Dict]:
         """Get current user info"""
         return self.current_user
+    
+    def start_previous_month_comparison(self, file_ids: List[str]):
+        try:
+            if not self.auth_token:
+                return False, "Authentication required", None
+
+            data = {'file_ids': file_ids}
+
+            response = self.session.post(
+                f"{self.base_url}/api/v1/files/compare-previous",
+                json=data,
+                headers=self._get_headers()
+            )
+
+            result = self._handle_response(response)
+
+            if result.get('success'):
+                return True, result.get('message'), result.get('job_id')
+            else:
+                return False, result.get('message', 'Failed to start comparison'), None
+
+        except Exception as e:
+            logger.error(f"Previous month comparison start error: {str(e)}")
+            return False, str(e), None
 
 
 # Global API client instance

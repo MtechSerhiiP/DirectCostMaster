@@ -70,6 +70,11 @@ class ProcessingRequest(BaseModel):
     analysis_mode: str = "single"  # 'single' for single month, 'ytd' for Year-to-Date
 
 
+class PreviousMonthComparisonRequest(BaseModel):
+    """Request payload for previous-month two-file comparison."""
+    file_ids: List[str]
+
+
 class ProcessingStartResponse(BaseModel):
     success: bool
     message: str
@@ -94,6 +99,13 @@ class ProcessingResults(BaseModel):
     failed_files: int
     error_details: Optional[List[str]] = None
     ytd_warnings: Optional[List[YTDValidationWarning]] = None  # Warnings about missing months
+    # Comparison-specific (prev_month mode)
+    total_mismatches: Optional[int] = None
+    dl_mismatches: Optional[int] = None
+    vc_mismatches: Optional[int] = None
+    download_url: Optional[str] = None
+    current_file: Optional[str] = None
+    previous_file: Optional[str] = None
 
 
 class ProcessingStatusResponse(BaseModel):

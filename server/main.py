@@ -221,6 +221,39 @@ async def start_processing(
         raise HTTPException(status_code=500, detail="Failed to start processing")
 
 
+@app.post("/api/v1/files/compare-previous", response_model=ProcessingStartResponse)
+async def start_previous_month_comparison(
+    request: PreviousMonthComparisonRequest,
+    background_tasks: BackgroundTasks,
+    current_user: dict = Depends(get_current_user)
+):
+    """Start previous-month comparison (two-file mode)."""
+    try:
+        if len(request.file_ids) != 2:
+            raise HTTPException(status_code=400, detail="Previous-month comparison requires exactly 2 files.")
+
+        job_id = str(uuid.uuid4())
+        background_tasks.add_task(
+            processing_service.process_previous_month_comparison,
+            job_id=job_id,
+            file_ids=request.file_ids,
+            user_id=current_user['id']
+        )
+
+        return ProcessingStartResponse(
+            success=True,
+            message="Previous-month comparison started",
+            job_id=job_id,
+            estimated_duration=30
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Previous-month comparison start error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to start previous-month comparison")
+
+
 @app.post('/api/v1/reconcile/program/propose', response_model=ReconcileReportResponse)
 async def propose_reconcile_program(
     request: ReconcileProgramRequest,
@@ -264,6 +297,24 @@ async def apply_reconcile_program(
     except Exception as e:
         logger.error(f"Apply reconcile error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/files/compare-previous/{job_id}/download")
+async def download_previous_month_comparison(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Download the comparison report Excel for a completed job."""
+    try:
+        content, filename = processing_service.get_comparison_download(job_id, current_user['id'])
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+        )
+    except Exception as e:
+        logger.error(f"Comparison download error: {str(e)}")
+        raise HTTPException(status_code=404, detail="Comparison report not found")
 
 
 @app.get("/api/v1/files/process/{job_id}/status", response_model=ProcessingStatusResponse)
