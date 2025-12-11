@@ -339,10 +339,67 @@ class ProcessingAPIService:
             else:
                 current, previous = parsed_a, parsed_b
 
+            # Filter data before comparison
+            def filter_comparison_data(parsed_data: Dict[str, Any], is_previous: bool) -> Dict[str, Any]:
+                """
+                Filter sheets to only include relevant cost sheets.
+                For previous month file: also remove data after last "Total" row.
+                """
+                # Only compare these specific sheets (case-insensitive)
+                allowed_sheets = {
+                    'dl costs (direct)',
+                    'dl costs (variable)', 
+                    'vc costs (direct)',
+                    'vc costs (variable)'
+                }
+                
+                filtered_sheets = {}
+                for sheet_name, rows in parsed_data['sheets'].items():
+                    sheet_lower = sheet_name.lower().strip()
+                    
+                    # Check if sheet is in allowed list
+                    if sheet_lower not in allowed_sheets:
+                        continue
+                    
+                    # If this is previous month file, find last "Total" row and cut off everything after
+                    if is_previous:
+                        last_total_row = -1
+                        # Find the last row containing "total" (case-insensitive) in any cell
+                        for row_idx in sorted(rows.keys(), reverse=True):
+                            row_data = rows[row_idx]
+                            for col, val in row_data.items():
+                                if val and isinstance(val, str) and 'total' in val.lower():
+                                    last_total_row = row_idx
+                                    break
+                            if last_total_row != -1:
+                                break
+                        
+                        # Keep only rows up to and including the last "Total" row
+                        if last_total_row != -1:
+                            filtered_rows = {idx: row for idx, row in rows.items() if idx <= last_total_row}
+                            filtered_sheets[sheet_name] = filtered_rows
+                        else:
+                            # No "Total" found, keep all rows
+                            filtered_sheets[sheet_name] = rows
+                    else:
+                        # Current month: keep all rows
+                        filtered_sheets[sheet_name] = rows
+                
+                return {
+                    'filename': parsed_data['filename'],
+                    'month': parsed_data['month'],
+                    'year': parsed_data['year'],
+                    'sheets': filtered_sheets
+                }
+            
+            # Apply filtering
+            current = filter_comparison_data(current, is_previous=False)
+            previous = filter_comparison_data(previous, is_previous=True)
+
             # Raw cell-by-cell comparison
             mismatches = []
             
-            # Compare all sheets in both files
+            # Compare only the filtered sheets
             all_sheets = set(current['sheets'].keys()) | set(previous['sheets'].keys())
             
             for sheet_name in sorted(all_sheets):
@@ -367,6 +424,10 @@ class ProcessingAPIService:
                         if cur_val == prev_val:
                             continue
                         
+                        # Skip if previous value is None (new data in current month only)
+                        if prev_val is None:
+                            continue
+                        
                         # Check if it's a numeric mismatch (not just one being None)
                         if cur_val is not None and prev_val is not None:
                             try:
@@ -377,7 +438,7 @@ class ProcessingAPIService:
                             except (ValueError, TypeError):
                                 pass  # Not numeric, compare as strings
                         
-                        # Report mismatch
+                        # Report mismatch (only if previous value existed)
                         mismatches.append({
                             'sheet': sheet_name,
                             'row': row_idx,
