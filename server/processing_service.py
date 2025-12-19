@@ -273,9 +273,9 @@ class ProcessingAPIService:
         return self.processing_jobs[job_id]
 
     async def process_previous_month_comparison(self, job_id: str, file_ids: List[str], user_id: int):
-        """Process two files with raw cell-by-cell comparison (not processed data)."""
-        if len(file_ids) != 2:
-            raise ValueError("Previous-month comparison requires exactly 2 files.")
+        """Process multiple files with raw cell-by-cell comparison, automatically pairing by name and month."""
+        if len(file_ids) < 2:
+            raise ValueError("Comparison requires at least 2 files.")
 
         # Initialize job
         self.processing_jobs[job_id] = {
@@ -291,61 +291,70 @@ class ProcessingAPIService:
         }
 
         try:
-            # Fetch files and basic validation
-            file_info_a = self.get_uploaded_file(file_ids[0], user_id)
-            file_info_b = self.get_uploaded_file(file_ids[1], user_id)
-            if not file_info_a or not file_info_b:
-                raise ValueError("One or both files not found or unauthorized")
+            # Fetch all files
+            file_infos = []
+            for file_id in file_ids:
+                file_info = self.get_uploaded_file(file_id, user_id)
+                if not file_info:
+                    raise ValueError(f"File {file_id} not found or unauthorized")
+                file_infos.append(file_info)
 
-            base_a = self._normalize_filename(file_info_a['filename'])
-            base_b = self._normalize_filename(file_info_b['filename'])
-            if base_a != base_b:
-                raise ValueError("Files must represent the same project/name (excluding month/year)")
+            # Helper function to convert column index to Excel-style letter (A, B, C, ... Z, AA, AB, etc.)
+            def col_index_to_letter(col_idx: int) -> str:
+                """Convert 0-based column index to Excel column letter."""
+                result = ""
+                col_idx += 1  # Excel columns are 1-based
+                while col_idx > 0:
+                    col_idx -= 1
+                    result = chr(col_idx % 26 + ord('A')) + result
+                    col_idx //= 26
+                return result
 
             # Parse Excel to JSON (raw data, no processing)
             def excel_to_json(file_info: Dict[str, Any]) -> Dict[str, Any]:
                 month, year = self._parse_month_year_from_filename(file_info['filename'])
                 file_io = io.BytesIO(file_info['content'])
-                excel_data = pd.read_excel(file_io, sheet_name=None, engine='openpyxl')
+                excel_data = pd.read_excel(file_io, sheet_name=None, engine='openpyxl', header=None)
                 
                 sheets_json = {}
                 for sheet_name, df in excel_data.items():
-                    # Convert DataFrame to dict of dicts: {row_idx: {col: value}}
+                    # Convert DataFrame to dict of dicts with Excel-style addressing
                     rows = {}
-                    for idx, row in df.iterrows():
+                    for pandas_row_idx, row in df.iterrows():
+                        excel_row = pandas_row_idx + 1  # Excel rows are 1-based
                         row_dict = {}
-                        for col in df.columns:
-                            val = row[col]
+                        for pandas_col_idx, val in enumerate(row):
+                            excel_col = col_index_to_letter(pandas_col_idx)
                             # Preserve value as-is (handles None, numbers, strings, etc.)
-                            row_dict[str(col)] = val if pd.notna(val) else None
-                        rows[int(idx)] = row_dict
+                            row_dict[excel_col] = val if pd.notna(val) else None
+                        rows[excel_row] = row_dict
                     sheets_json[sheet_name] = rows
                 
                 return {
                     'filename': file_info['filename'],
                     'month': month,
                     'year': year,
-                    'sheets': sheets_json
+                    'sheets': sheets_json,
+                    'project_name': self._normalize_filename(file_info['filename'])
                 }
 
-            parsed_a = excel_to_json(file_info_a)
-            parsed_b = excel_to_json(file_info_b)
+            # Parse all files
+            parsed_files = [excel_to_json(fi) for fi in file_infos]
 
-            # Determine current vs previous by month index
-            idx_a = self._month_index(parsed_a['month'])
-            idx_b = self._month_index(parsed_b['month'])
-            if idx_a != -1 and idx_b != -1 and idx_a != idx_b:
-                current, previous = (parsed_a, parsed_b) if idx_a > idx_b else (parsed_b, parsed_a)
-            else:
-                current, previous = parsed_a, parsed_b
+            # Group files by project name
+            projects = {}
+            for parsed in parsed_files:
+                project = parsed['project_name']
+                if project not in projects:
+                    projects[project] = []
+                projects[project].append(parsed)
 
-            # Filter data before comparison
+            # Helper function to filter comparison data
             def filter_comparison_data(parsed_data: Dict[str, Any], is_previous: bool) -> Dict[str, Any]:
                 """
                 Filter sheets to only include relevant cost sheets.
                 For previous month file: also remove data after last "Total" row.
                 """
-                # Only compare these specific sheets (case-insensitive)
                 allowed_sheets = {
                     'dl costs (direct)',
                     'dl costs (variable)', 
@@ -357,14 +366,12 @@ class ProcessingAPIService:
                 for sheet_name, rows in parsed_data['sheets'].items():
                     sheet_lower = sheet_name.lower().strip()
                     
-                    # Check if sheet is in allowed list
                     if sheet_lower not in allowed_sheets:
                         continue
                     
-                    # If this is previous month file, find last "Total" row and cut off everything after
+                    # If this is previous month file, find last "Total" row
                     if is_previous:
                         last_total_row = -1
-                        # Find the last row containing "total" (case-insensitive) in any cell
                         for row_idx in sorted(rows.keys(), reverse=True):
                             row_data = rows[row_idx]
                             for col, val in row_data.items():
@@ -374,110 +381,136 @@ class ProcessingAPIService:
                             if last_total_row != -1:
                                 break
                         
-                        # Keep only rows up to and including the last "Total" row
                         if last_total_row != -1:
                             filtered_rows = {idx: row for idx, row in rows.items() if idx <= last_total_row}
                             filtered_sheets[sheet_name] = filtered_rows
                         else:
-                            # No "Total" found, keep all rows
                             filtered_sheets[sheet_name] = rows
                     else:
-                        # Current month: keep all rows
                         filtered_sheets[sheet_name] = rows
                 
                 return {
                     'filename': parsed_data['filename'],
                     'month': parsed_data['month'],
                     'year': parsed_data['year'],
-                    'sheets': filtered_sheets
+                    'sheets': filtered_sheets,
+                    'project_name': parsed_data['project_name']
                 }
-            
-            # Apply filtering
-            current = filter_comparison_data(current, is_previous=False)
-            previous = filter_comparison_data(previous, is_previous=True)
 
-            # Raw cell-by-cell comparison
-            mismatches = []
-            
-            # Compare only the filtered sheets
-            all_sheets = set(current['sheets'].keys()) | set(previous['sheets'].keys())
-            
-            for sheet_name in sorted(all_sheets):
-                cur_sheet = current['sheets'].get(sheet_name, {})
-                prev_sheet = previous['sheets'].get(sheet_name, {})
+            # Helper function to compare two files
+            def compare_two_files(current: Dict[str, Any], previous: Dict[str, Any]) -> List[Dict[str, Any]]:
+                """Compare two files and return list of mismatches."""
+                mismatches = []
+                all_sheets = set(current['sheets'].keys()) | set(previous['sheets'].keys())
                 
-                # Get all row indices from both sheets
-                all_rows = set(cur_sheet.keys()) | set(prev_sheet.keys())
+                for sheet_name in sorted(all_sheets):
+                    cur_sheet = current['sheets'].get(sheet_name, {})
+                    prev_sheet = previous['sheets'].get(sheet_name, {})
+                    
+                    all_rows = set(cur_sheet.keys()) | set(prev_sheet.keys())
+                    
+                    for row_idx in sorted(all_rows):
+                        cur_row = cur_sheet.get(row_idx, {})
+                        prev_row = prev_sheet.get(row_idx, {})
+                        
+                        all_cols = set(cur_row.keys()) | set(prev_row.keys())
+                        
+                        for col in sorted(all_cols):
+                            cur_val = cur_row.get(col)
+                            prev_val = prev_row.get(col)
+                            
+                            if cur_val == prev_val:
+                                continue
+                            
+                            if prev_val is None:
+                                continue
+                            
+                            if cur_val is not None and prev_val is not None:
+                                try:
+                                    cur_num = float(cur_val)
+                                    prev_num = float(prev_val)
+                                    if round(cur_num - prev_num, 2) == 0:
+                                        continue
+                                except (ValueError, TypeError):
+                                    pass
+                            
+                            mismatches.append({
+                                'sheet': sheet_name,
+                                'row': row_idx,
+                                'column': col,
+                                'current_value': str(cur_val) if cur_val is not None else 'EMPTY',
+                                'previous_value': str(prev_val) if prev_val is not None else 'EMPTY',
+                                'current_file': current['filename'],
+                                'previous_file': previous['filename'],
+                                'project': current['project_name'],
+                                'current_period': f"{current['month']} {current['year']}" if current['month'] else 'Current',
+                                'previous_period': f"{previous['month']} {previous['year']}" if previous['month'] else 'Previous'
+                            })
                 
-                for row_idx in sorted(all_rows):
-                    cur_row = cur_sheet.get(row_idx, {})
-                    prev_row = prev_sheet.get(row_idx, {})
-                    
-                    # Get all column names from both rows
-                    all_cols = set(cur_row.keys()) | set(prev_row.keys())
-                    
-                    for col in sorted(all_cols):
-                        cur_val = cur_row.get(col)
-                        prev_val = prev_row.get(col)
-                        
-                        # Skip if both are None or equal
-                        if cur_val == prev_val:
-                            continue
-                        
-                        # Skip if previous value is None (new data in current month only)
-                        if prev_val is None:
-                            continue
-                        
-                        # Check if it's a numeric mismatch (not just one being None)
-                        if cur_val is not None and prev_val is not None:
-                            try:
-                                cur_num = float(cur_val)
-                                prev_num = float(prev_val)
-                                if round(cur_num - prev_num, 2) == 0:
-                                    continue  # Floating point equal
-                            except (ValueError, TypeError):
-                                pass  # Not numeric, compare as strings
-                        
-                        # Report mismatch (only if previous value existed)
-                        mismatches.append({
-                            'sheet': sheet_name,
-                            'row': row_idx,
-                            'column': col,
-                            'current_value': str(cur_val) if cur_val is not None else 'EMPTY',
-                            'previous_value': str(prev_val) if prev_val is not None else 'EMPTY',
-                            'current_file': current['filename'],
-                            'previous_file': previous['filename'],
-                            'current_period': f"{current['month']} {current['year']}" if current['month'] else 'Current',
-                            'previous_period': f"{previous['month']} {previous['year']}" if previous['month'] else 'Previous'
-                        })
+                return mismatches
 
-            # Build Excel report
+            # Collect all mismatches from all projects
+            all_mismatches = []
+            comparison_pairs = []
+
+            for project, files in projects.items():
+                # Sort files by month within project
+                files_by_month = [(f, self._month_index(f['month'])) for f in files]
+                files_by_month.sort(key=lambda x: (x[1], x[0]['year']))
+
+                # Pair consecutive months and apply filtering
+                for i in range(len(files_by_month) - 1):
+                    previous_file = filter_comparison_data(files_by_month[i][0], is_previous=True)
+                    current_file = filter_comparison_data(files_by_month[i + 1][0], is_previous=False)
+                    
+                    # Compare pair
+                    pair_mismatches = compare_two_files(current_file, previous_file)
+                    all_mismatches.extend(pair_mismatches)
+                    
+                    comparison_pairs.append({
+                        'project': project,
+                        'previous': previous_file['filename'],
+                        'current': current_file['filename'],
+                        'mismatches_count': len(pair_mismatches)
+                    })
+
+            # Build Excel report with multiple sheets
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                summary_df = pd.DataFrame([
-                    {
-                        'Project': base_a,
-                        'Current File': current['filename'],
-                        'Previous File': previous['filename'],
-                        'Current Period': f"{current['month']} {current['year']}" if current['month'] else 'Current',
-                        'Previous Period': f"{previous['month']} {previous['year']}" if previous['month'] else 'Previous',
-                        'Total mismatches': len(mismatches)
-                    }
-                ])
+                # Summary sheet
+                summary_rows = []
+                for pair in comparison_pairs:
+                    summary_rows.append({
+                        'Project': pair['project'],
+                        'Previous File': pair['previous'],
+                        'Current File': pair['current'],
+                        'Mismatches': pair['mismatches_count']
+                    })
+                summary_rows.append({
+                    'Project': 'TOTAL',
+                    'Previous File': '',
+                    'Current File': '',
+                    'Mismatches': len(all_mismatches)
+                })
+                
+                summary_df = pd.DataFrame(summary_rows)
                 summary_df.to_excel(writer, sheet_name='Summary', index=False)
 
-                if mismatches:
-                    mismatch_df = pd.DataFrame(mismatches)
+                # Mismatches sheet
+                if all_mismatches:
+                    mismatch_df = pd.DataFrame(all_mismatches)
                     mismatch_df.to_excel(writer, sheet_name='Mismatches', index=False)
                 else:
-                    pd.DataFrame([{'Info': 'No cell mismatches found between the two files.'}]).to_excel(writer, sheet_name='Mismatches', index=False)
+                    pd.DataFrame([{'Info': 'No cell mismatches found between all files.'}]).to_excel(
+                        writer, sheet_name='Mismatches', index=False
+                    )
 
             output.seek(0)
             excel_bytes = output.getvalue()
             expires_at = datetime.utcnow() + timedelta(hours=1)
             self.comparison_exports[job_id] = {
                 'content': excel_bytes,
-                'filename': f"CellComparison_{current['filename']}_vs_{previous['filename']}.xlsx",
+                'filename': f"MultiFileComparison_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 'user_id': user_id,
                 'created_at': datetime.utcnow(),
                 'expires_at': expires_at
@@ -488,17 +521,17 @@ class ProcessingAPIService:
                 'total_records': 0,
                 'dl_records': 0,
                 'vc_records': 0,
-                'projects': 0,
-                'successful_files': 0,
+                'projects': len(projects),
+                'successful_files': len(file_ids),
                 'failed_files': 0,
                 'error_details': None,
                 # Comparison-specific fields
-                'total_mismatches': len(mismatches),
+                'total_mismatches': len(all_mismatches),
                 'dl_mismatches': 0,
                 'vc_mismatches': 0,
                 'download_url': f"/api/v1/files/compare-previous/{job_id}/download",
-                'current_file': current['filename'],
-                'previous_file': previous['filename']
+                'current_file': 'Multiple files',
+                'previous_file': 'Multiple files'
             }
 
             self.processing_jobs[job_id].update({
@@ -509,7 +542,7 @@ class ProcessingAPIService:
                 'error_message': None
             })
 
-            logger.info(f"Cell comparison job {job_id} completed: {len(mismatches)} cell mismatches found")
+            logger.info(f"Multi-file comparison job {job_id} completed: {len(all_mismatches)} cell mismatches found across {len(projects)} project(s)")
 
         except Exception as e:
             self.processing_jobs[job_id].update({
@@ -518,7 +551,7 @@ class ProcessingAPIService:
                 'completed_at': datetime.utcnow(),
                 'error_message': str(e)
             })
-            logger.error(f"Cell comparison job {job_id} failed: {str(e)}")
+            logger.error(f"Multi-file comparison job {job_id} failed: {str(e)}")
             raise
 
     def get_comparison_download(self, job_id: str, user_id: int) -> Tuple[bytes, str]:

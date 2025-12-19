@@ -227,10 +227,10 @@ async def start_previous_month_comparison(
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user)
 ):
-    """Start previous-month comparison (two-file mode)."""
+    """Start previous-month comparison (multi-file mode)."""
     try:
-        if len(request.file_ids) != 2:
-            raise HTTPException(status_code=400, detail="Previous-month comparison requires exactly 2 files.")
+        if len(request.file_ids) < 2:
+            raise HTTPException(status_code=400, detail="Previous-month comparison requires at least 2 files.")
 
         job_id = str(uuid.uuid4())
         background_tasks.add_task(
@@ -242,9 +242,9 @@ async def start_previous_month_comparison(
 
         return ProcessingStartResponse(
             success=True,
-            message="Previous-month comparison started",
+            message=f"Previous-month comparison started for {len(request.file_ids)} files",
             job_id=job_id,
-            estimated_duration=30
+            estimated_duration=60
         )
 
     except HTTPException:

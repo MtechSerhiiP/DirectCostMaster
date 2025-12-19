@@ -330,7 +330,7 @@ class DirectCostMasterClient:
                 options={
                     'single': 'Single Month - Process only selected month',
                     'ytd': 'YTD (Year-to-Date) - Process January through selected month',
-                    'prev_month': 'Compare with previous month (two-file mode)'
+                    'prev_month': 'Compare with previous month (multi-file mode)'
                 },
                 value='single'
             ).classes('w-full mb-4')
@@ -492,18 +492,17 @@ class DirectCostMasterClient:
             #  NEW FEATURE: PREVIOUS MONTH COMPARISON (radio option)
             if analysis_mode == 'prev_month':
 
-                # Strict validation: need exactly 2 files
-                if len(file_ids) != 2:
+                # Validation: need at least 2 files
+                if len(file_ids) < 2:
                     ui.notify(
-                        'Previous month comparison requires exactly 2 Excel files:\n'
-                        '• current month\n'
-                        '• previous month',
+                        'Previous month comparison requires at least 2 Excel files.\n'
+                        'Files will be automatically paired by project name and month.',
                         type='warning',
                     )
                     return
 
                 ui.notify(
-                    'Starting previous-month comparison for 2 files...',
+                    f'Starting previous-month comparison for {len(file_ids)} files...',
                     type='info'
                 )
 
@@ -580,10 +579,18 @@ class DirectCostMasterClient:
                         # Comparison job
                         current_file = results.get('current_file', 'Unknown')
                         previous_file = results.get('previous_file', 'Unknown')
-                        ui.notify(
-                            f'Comparison completed! Found {total_mismatches} cell mismatches between {current_file} and {previous_file}',
-                            type='positive'
-                        )
+                        projects_count = results.get('projects', 0)
+                        
+                        if projects_count > 1 or 'Multiple' in current_file:
+                            ui.notify(
+                                f'Multi-file comparison completed! Found {total_mismatches} cell mismatches across {projects_count} project(s)',
+                                type='positive'
+                            )
+                        else:
+                            ui.notify(
+                                f'Comparison completed! Found {total_mismatches} cell mismatches',
+                                type='positive'
+                            )
                         
                         # Show download button for comparison report
                         download_url = results.get('download_url', '')
