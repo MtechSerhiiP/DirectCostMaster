@@ -22,6 +22,7 @@ A modern web-based application for processing P&L Excel files and consolidating 
 
 - Python 3.8 or higher
 - PostgreSQL 12 or higher
+- Docker
 - Git (for cloning the repository)
 
 ## Installation
