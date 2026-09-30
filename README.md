@@ -32,56 +32,18 @@ git clone <repository-url>
 cd DirectCostMaster
 ```
 
-2. **Create virtual environment**:
+2. **Run Docker compose**:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+docker compose up --build
 ```
 
-3. **Install required packages**:
-```bash
-pip install -r requirements.txt
-```
 
-4. **Set up PostgreSQL database**:
-```bash
-# Create database
-createdb directcostmaster
+3. **Open your browser** and navigate to `http://0.0.0.0:8080`
 
-# Or using psql:
-psql -U postgres
-CREATE DATABASE directcostmaster;
-\q
-```
-
-5. **Configure environment variables**:
-```bash
-# Copy example environment file
-cp .env.example .env
-
-# Edit .env file with your database credentials
-DATABASE_URL=postgresql://username:password@localhost:5432/directcostmaster
-```
-
-6. **Initialize database**:
-```bash
-python init_db.py
-```
-
-7. **Run the application**:
-```bash
-python main.py
-```
-
-8. **Open your browser** and navigate to `http://127.0.0.1:8080`
-
-## Default Login
-
-After running `init_db.py`, you can log in with:
+## Default Login:
+you can log in with:
 - **Username**: admin
-- **Password**: admin123
-
-⚠️ **Important**: Change the default password after first login!
+- **Password**: admin
 
 ## How to Use
 
